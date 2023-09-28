@@ -41,7 +41,7 @@ using namespace DirectX;
 } while(0)
 
 #define LOG(fmt, ...) do { \
-    fprintf(stderr, "%s(%d) LOG: ", __FILE__, __LINE__); \
+    fprintf(stderr, "LOG %s(%d): ", __FILE__, __LINE__); \
     fprintf(stderr, (fmt), __VA_ARGS__); \
     fprintf(stderr, "\n"); \
 } while(0)

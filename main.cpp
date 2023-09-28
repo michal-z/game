@@ -7,15 +7,17 @@ extern "C" {
 
 constexpr const char* window_name = "my_game";
 constexpr bool enable_debug_layer = true;
+constexpr auto num_graphics_frames = 2;
 
 struct GraphicsContext {
     IDXGIFactory7* dxgi_factory;
     IDXGIAdapter4* adapter;
     ID3D12Device12* device;
     ID3D12CommandQueue* command_queue;
+    IDXGISwapChain4* swap_chain;
 };
 
-static bool init_graphics_context(GraphicsContext* gr)
+static bool init_graphics_context(HWND window, GraphicsContext* gr)
 {
     assert(gr && gr->device == nullptr);
 
@@ -51,12 +53,42 @@ static bool init_graphics_context(GraphicsContext* gr)
 
     LOG("Command queue created");
 
+    RECT rect = {};
+    GetClientRect(window, &rect);
+
+    const DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {
+        .Width = static_cast<UINT>(rect.right),
+        .Height = static_cast<UINT>(rect.bottom),
+        .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+        .Stereo = FALSE,
+        .SampleDesc = { .Count = 1, .Quality = 0 },
+        .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        .BufferCount = num_graphics_frames,
+        .Scaling = DXGI_SCALING_NONE,
+        .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+        .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,
+        .Flags = 0,
+    };
+    IDXGISwapChain1* swap_chain1 = nullptr;
+    RETURN_IF_FAIL(gr->dxgi_factory->CreateSwapChainForHwnd(gr->command_queue, window, &swap_chain_desc, nullptr, nullptr, &swap_chain1));
+
+    if (FAILED(swap_chain1->QueryInterface(IID_PPV_ARGS(&gr->swap_chain)))) {
+        SAFE_RELEASE(swap_chain1);
+        return false;
+    }
+    SAFE_RELEASE(swap_chain1);
+
+    LOG("Swap chain created");
+
+    RETURN_IF_FAIL(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
+
     return true;
 }
 
 static void deinit_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
+    SAFE_RELEASE(gr->swap_chain);
     SAFE_RELEASE(gr->command_queue);
     SAFE_RELEASE(gr->device);
     SAFE_RELEASE(gr->adapter);
@@ -71,12 +103,17 @@ static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM
                 PostQuitMessage(0);
                 return 0;
             }
-            break;
-        }
+        } break;
         case WM_DESTROY: {
             PostQuitMessage(0);
             return 0;
-        }
+        } break;
+        case WM_GETMINMAXINFO: {
+            auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+            info->ptMinTrackSize.x = 400;
+            info->ptMinTrackSize.y = 400;
+            return 0;
+        } break;
     }
     return DefWindowProcA(window, message, wparam, lparam);
 }
@@ -115,7 +152,7 @@ int main()
     LOG("Window DPI scale: %f", ImGui_ImplWin32_GetDpiScaleForHwnd(window));
 
     GraphicsContext gr = {};
-    if (!init_graphics_context(&gr)) {
+    if (!init_graphics_context(window, &gr)) {
         deinit_graphics_context(&gr);
         return 1;
     }
