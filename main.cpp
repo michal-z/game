@@ -11,10 +11,18 @@ constexpr auto num_graphics_frames = 2;
 
 struct GraphicsContext {
     IDXGIFactory7* dxgi_factory;
+
     IDXGIAdapter4* adapter;
     ID3D12Device12* device;
+
     ID3D12CommandQueue* command_queue;
+
     IDXGISwapChain4* swap_chain;
+    ID3D12Resource* swap_chain_buffers[num_graphics_frames];
+
+    ID3D12DescriptorHeap* rtv_heap;
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv_heap_start;
+    UINT rtv_heap_descriptor_size;
 };
 
 static bool init_graphics_context(HWND window, GraphicsContext* gr)
@@ -78,9 +86,29 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     }
     SAFE_RELEASE(swap_chain1);
 
+    RETURN_IF_FAIL(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
+
+    for (int i = 0; i < num_graphics_frames; ++i) {
+        RETURN_IF_FAIL(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
+    }
+
     LOG("Swap chain created");
 
-    RETURN_IF_FAIL(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
+    const D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {
+        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+        .NumDescriptors = 1024,
+        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+        .NodeMask = 0,
+    };
+    RETURN_IF_FAIL(gr->device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&gr->rtv_heap)));
+    gr->rtv_heap_start = gr->rtv_heap->GetCPUDescriptorHandleForHeapStart();
+    gr->rtv_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+    for (int i = 0; i < num_graphics_frames; ++i) {
+        gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
+    }
+
+    LOG("Render target view (RTV) heap created");
 
     return true;
 }
@@ -88,6 +116,8 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 static void deinit_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
+    SAFE_RELEASE(gr->rtv_heap);
+    for (int i = 0; i < num_graphics_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
     SAFE_RELEASE(gr->swap_chain);
     SAFE_RELEASE(gr->command_queue);
     SAFE_RELEASE(gr->device);
@@ -127,14 +157,21 @@ static HWND create_window(int width, int height)
         .hCursor = LoadCursor(nullptr, IDC_ARROW),
         .lpszClassName = window_name,
     };
-    if (!RegisterClassExA(&winclass)) assert(false);
+    if (!RegisterClassExA(&winclass)) return nullptr;
+
+    LOG("Window class registered");
 
     const DWORD style = WS_OVERLAPPEDWINDOW;
 
     RECT rect = { 0, 0, width, height };
     AdjustWindowRectEx(&rect, style, FALSE, 0);
 
-    return CreateWindowExA(0, window_name, window_name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
+    const HWND window = CreateWindowExA(0, window_name, window_name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
+    if (!window) return nullptr;
+
+    LOG("Window created");
+
+    return window;
 }
 
 int main()
