@@ -1,5 +1,6 @@
 #pragma once
 
+
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -25,6 +26,19 @@
 #include "DirectXMath.h"
 using namespace DirectX;
 
+using u64 = uint64_t;
+using u32 = uint32_t;
+using u16 = uint16_t;
+using u8 = uint8_t;
+using i64 = int64_t;
+using i32 = int32_t;
+using i16 = int16_t;
+using i8 = int8_t;
+using usize = size_t;
+using ssize = ptrdiff_t;
+using f32 = float;
+using f64 = double;
+
 #define RETURN_IF_FAIL(hr) do { \
     if (FAILED(hr)) { \
         OutputDebugStringA("HRESULT error detected"); \
@@ -41,7 +55,6 @@ using namespace DirectX;
 } while(0)
 
 #define LOG(fmt, ...) do { \
-    fprintf(stderr, "LOG %s(%d): ", __FILE__, __LINE__); \
     fprintf(stderr, (fmt), __VA_ARGS__); \
-    fprintf(stderr, "\n"); \
+    fprintf(stderr, " (%s:%d)\n", __FILE__, __LINE__); \
 } while(0)

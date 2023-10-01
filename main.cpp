@@ -1,7 +1,7 @@
 #include "pch.h"
 
 extern "C" {
-    __declspec(dllexport) extern const UINT D3D12SDKVersion = 610;
+    __declspec(dllexport) extern const u32 D3D12SDKVersion = 610;
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
@@ -11,7 +11,6 @@ constexpr auto num_graphics_frames = 2;
 
 struct GraphicsContext {
     IDXGIFactory7* dxgi_factory;
-
     IDXGIAdapter4* adapter;
     ID3D12Device12* device;
 
@@ -22,7 +21,12 @@ struct GraphicsContext {
 
     ID3D12DescriptorHeap* rtv_heap;
     D3D12_CPU_DESCRIPTOR_HANDLE rtv_heap_start;
-    UINT rtv_heap_descriptor_size;
+    u32 rtv_heap_descriptor_size;
+
+    ID3D12Fence* frame_fence;
+    HANDLE frame_fence_event;
+    u64 frame_fence_counter;
+    u32 frame_fence_index;
 };
 
 static bool init_graphics_context(HWND window, GraphicsContext* gr)
@@ -36,7 +40,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     DXGI_ADAPTER_DESC3 adapter_desc = {};
     RETURN_IF_FAIL(gr->adapter->GetDesc3(&adapter_desc));
 
-    LOG("Graphics adapter: %S", adapter_desc.Description);
+    LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
     if (enable_debug_layer) {
         ID3D12Debug6* debug = nullptr;
@@ -49,7 +53,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     RETURN_IF_FAIL(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)));
 
-    LOG("D3D12 device created");
+    LOG("[graphics] D3D12 device created");
 
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -59,14 +63,14 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     };
     RETURN_IF_FAIL(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
-    LOG("Command queue created");
+    LOG("[graphics] Command queue created");
 
     RECT rect = {};
     GetClientRect(window, &rect);
 
     const DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {
-        .Width = static_cast<UINT>(rect.right),
-        .Height = static_cast<UINT>(rect.bottom),
+        .Width = static_cast<u32>(rect.right),
+        .Height = static_cast<u32>(rect.bottom),
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
         .Stereo = FALSE,
         .SampleDesc = { .Count = 1, .Quality = 0 },
@@ -88,11 +92,11 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     RETURN_IF_FAIL(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
-    for (int i = 0; i < num_graphics_frames; ++i) {
+    for (i32 i = 0; i < num_graphics_frames; ++i) {
         RETURN_IF_FAIL(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
     }
 
-    LOG("Swap chain created");
+    LOG("[graphics] Swap chain created");
 
     const D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {
         .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
@@ -104,11 +108,21 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     gr->rtv_heap_start = gr->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     gr->rtv_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    for (int i = 0; i < num_graphics_frames; ++i) {
+    for (i32 i = 0; i < num_graphics_frames; ++i) {
         gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
     }
 
-    LOG("Render target view (RTV) heap created");
+    LOG("[graphics] Render target view (RTV) heap created");
+
+    RETURN_IF_FAIL(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
+
+    gr->frame_fence_event = CreateEventEx(nullptr, "frame_fence_event", 0, EVENT_ALL_ACCESS);
+    if (gr->frame_fence_event == nullptr) return false;
+
+    gr->frame_fence_counter = 0;
+    gr->frame_fence_index = gr->swap_chain->GetCurrentBackBufferIndex();
+
+    LOG("[graphics] Frame fence created");
 
     return true;
 }
@@ -116,8 +130,13 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 static void deinit_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
+    if (gr->frame_fence_event) {
+        CloseHandle(gr->frame_fence_event);
+        gr->frame_fence_event = nullptr;
+    }
+    SAFE_RELEASE(gr->frame_fence);
     SAFE_RELEASE(gr->rtv_heap);
-    for (int i = 0; i < num_graphics_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
+    for (i32 i = 0; i < num_graphics_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
     SAFE_RELEASE(gr->swap_chain);
     SAFE_RELEASE(gr->command_queue);
     SAFE_RELEASE(gr->device);
@@ -145,10 +164,10 @@ static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM
             return 0;
         } break;
     }
-    return DefWindowProcA(window, message, wparam, lparam);
+    return DefWindowProc(window, message, wparam, lparam);
 }
 
-static HWND create_window(int width, int height)
+static HWND create_window(i32 width, i32 height)
 {
     const WNDCLASSEXA winclass = {
         .cbSize = sizeof(winclass),
@@ -157,36 +176,36 @@ static HWND create_window(int width, int height)
         .hCursor = LoadCursor(nullptr, IDC_ARROW),
         .lpszClassName = window_name,
     };
-    if (!RegisterClassExA(&winclass)) return nullptr;
+    if (!RegisterClassEx(&winclass)) return nullptr;
 
-    LOG("Window class registered");
+    LOG("[core] Window class registered");
 
     const DWORD style = WS_OVERLAPPEDWINDOW;
 
     RECT rect = { 0, 0, width, height };
     AdjustWindowRectEx(&rect, style, FALSE, 0);
 
-    const HWND window = CreateWindowExA(0, window_name, window_name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
+    const HWND window = CreateWindowEx(0, window_name, window_name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
     if (!window) return nullptr;
 
-    LOG("Window created");
+    LOG("[core] Window created");
 
     return window;
 }
 
-int main()
+i32 main()
 {
     ImGui_ImplWin32_EnableDpiAwareness();
 
-    std::vector<int> v;
+    std::vector<i32> v;
     v.push_back(1);
     v.push_back(2);
-    for (auto i = std::begin(v); i != std::end(v); ++i) {
-        LOG("%d", *i);
+    for (auto i = v.begin(); i != v.end(); ++i) {
+        LOG("[test] %d", *i);
     }
 
     const HWND window = create_window(1200, 800);
-    LOG("Window DPI scale: %f", ImGui_ImplWin32_GetDpiScaleForHwnd(window));
+    LOG("[graphics] Window DPI scale: %f", ImGui_ImplWin32_GetDpiScaleForHwnd(window));
 
     GraphicsContext gr = {};
     if (!init_graphics_context(window, &gr)) {
