@@ -7,7 +7,8 @@ extern "C" {
 
 constexpr const char* window_name = "my_game";
 constexpr bool enable_debug_layer = true;
-constexpr auto num_graphics_frames = 2;
+constexpr auto num_gpu_frames = 2;
+constexpr auto max_gpu_descriptors = 10000;
 
 struct GraphicsContext {
     IDXGIFactory7* dxgi_factory;
@@ -15,15 +16,20 @@ struct GraphicsContext {
     ID3D12Device12* device;
 
     ID3D12CommandQueue* command_queue;
-    ID3D12CommandAllocator* command_allocators[num_graphics_frames];
+    ID3D12CommandAllocator* command_allocators[num_gpu_frames];
     ID3D12GraphicsCommandList9* command_list;
 
     IDXGISwapChain4* swap_chain;
-    ID3D12Resource* swap_chain_buffers[num_graphics_frames];
+    ID3D12Resource* swap_chain_buffers[num_gpu_frames];
 
     ID3D12DescriptorHeap* rtv_heap;
     D3D12_CPU_DESCRIPTOR_HANDLE rtv_heap_start;
     u32 rtv_heap_descriptor_size;
+
+    ID3D12DescriptorHeap* gpu_heap;
+    D3D12_CPU_DESCRIPTOR_HANDLE gpu_heap_start_cpu;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu_heap_start_gpu;
+    u32 gpu_heap_descriptor_size;
 
     ID3D12Fence* frame_fence;
     HANDLE frame_fence_event;
@@ -77,7 +83,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Stereo = FALSE,
         .SampleDesc = { .Count = 1, .Quality = 0 },
         .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-        .BufferCount = num_graphics_frames,
+        .BufferCount = num_gpu_frames,
         .Scaling = DXGI_SCALING_NONE,
         .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
         .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,
@@ -91,7 +97,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     VHR(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
-    for (i32 i = 0; i < num_graphics_frames; ++i) {
+    for (i32 i = 0; i < num_gpu_frames; ++i) {
         VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
     }
 
@@ -107,11 +113,24 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     gr->rtv_heap_start = gr->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     gr->rtv_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    for (i32 i = 0; i < num_graphics_frames; ++i) {
+    for (i32 i = 0; i < num_gpu_frames; ++i) {
         gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
     }
 
-    LOG("[graphics] Render target view (RTV) heap created");
+    LOG("[graphics] Render target view (RTV) descriptor heap created");
+
+    const D3D12_DESCRIPTOR_HEAP_DESC gpu_heap_desc = {
+        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        .NumDescriptors = max_gpu_descriptors,
+        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+        .NodeMask = 0,
+    };
+    VHR(gr->device->CreateDescriptorHeap(&gpu_heap_desc, IID_PPV_ARGS(&gr->gpu_heap)));
+    gr->gpu_heap_start_cpu = gr->gpu_heap->GetCPUDescriptorHandleForHeapStart();
+    gr->gpu_heap_start_gpu = gr->gpu_heap->GetGPUDescriptorHandleForHeapStart();
+    gr->gpu_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    LOG("[graphics] GPU descriptor heap (CBV_SRV_UAV, SHADER_VISIBLE) created");
 
     VHR(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
 
@@ -123,19 +142,32 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Frame fence created");
 
+    for (i32 i = 0; i < num_gpu_frames; ++i) {
+        VHR(gr->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gr->command_allocators[i])));
+    }
+
+    LOG("[graphics] Command allocators created");
+
+    VHR(gr->device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&gr->command_list)));
+
+    LOG("[graphics] Command list created");
+
     return true;
 }
 
 static void deinit_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
+    SAFE_RELEASE(gr->command_list);
+    for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->command_allocators[i]);
     if (gr->frame_fence_event) {
         CloseHandle(gr->frame_fence_event);
         gr->frame_fence_event = nullptr;
     }
     SAFE_RELEASE(gr->frame_fence);
+    SAFE_RELEASE(gr->gpu_heap);
     SAFE_RELEASE(gr->rtv_heap);
-    for (i32 i = 0; i < num_graphics_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
+    for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
     SAFE_RELEASE(gr->swap_chain);
     SAFE_RELEASE(gr->command_queue);
     SAFE_RELEASE(gr->device);
