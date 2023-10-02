@@ -6,11 +6,16 @@ extern "C" {
 }
 
 constexpr const char* window_name = "my_game";
-constexpr bool enable_debug_layer = true;
-constexpr auto num_gpu_frames = 2;
+
+constexpr bool enable_d3d12_debug_layer = true;
+constexpr auto num_gpu_frames = 3;
 constexpr auto max_gpu_descriptors = 10000;
 
 struct GraphicsContext {
+    HWND window;
+    i32 window_width;
+    i32 window_height;
+
     IDXGIFactory7* dxgi_factory;
     IDXGIAdapter4* adapter;
     ID3D12Device12* device;
@@ -34,14 +39,48 @@ struct GraphicsContext {
     ID3D12Fence* frame_fence;
     HANDLE frame_fence_event;
     u64 frame_fence_counter;
-    u32 frame_fence_index;
+    u32 frame_index;
 };
+
+static bool present_gpu_frame(GraphicsContext* gr)
+{
+    assert(gr && gr->device);
+    gr->frame_fence_counter += 1;
+
+    VHR(gr->swap_chain->Present(0, 0));
+    VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
+
+    const u64 gpu_frame_counter = gr->frame_fence->GetCompletedValue();
+    if ((gr->frame_fence_counter - gpu_frame_counter) >= num_gpu_frames) {
+        VHR(gr->frame_fence->SetEventOnCompletion(gpu_frame_counter + 1, gr->frame_fence_event));
+        WaitForSingleObject(gr->frame_fence_event, INFINITE);
+    }
+
+    gr->frame_index = (gr->frame_index + 1) % num_gpu_frames;
+
+    return true;
+}
+
+static bool finish_gpu_commands(GraphicsContext* gr)
+{
+    assert(gr && gr->device);
+    gr->frame_fence_counter += 1;
+
+    VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
+    VHR(gr->frame_fence->SetEventOnCompletion(gr->frame_fence_counter, gr->frame_fence_event));
+
+    WaitForSingleObject(gr->frame_fence_event, INFINITE);
+
+    return true;
+}
 
 static bool init_graphics_context(HWND window, GraphicsContext* gr)
 {
     assert(gr && gr->device == nullptr);
 
-    VHR(CreateDXGIFactory2(enable_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
+    gr->window = window;
+
+    VHR(CreateDXGIFactory2(enable_d3d12_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
 
     VHR(gr->dxgi_factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&gr->adapter)));
 
@@ -50,7 +89,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
-    if (enable_debug_layer) {
+    if (enable_d3d12_debug_layer) {
         ID3D12Debug6* debug = nullptr;
         D3D12GetDebugInterface(IID_PPV_ARGS(&debug));
         if (debug) {
@@ -75,10 +114,12 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     RECT rect = {};
     GetClientRect(window, &rect);
+    gr->window_width = rect.right;
+    gr->window_height = rect.bottom;
 
     const DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {
-        .Width = static_cast<u32>(rect.right),
-        .Height = static_cast<u32>(rect.bottom),
+        .Width = static_cast<u32>(gr->window_width),
+        .Height = static_cast<u32>(gr->window_height),
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
         .Stereo = FALSE,
         .SampleDesc = { .Count = 1, .Quality = 0 },
@@ -138,7 +179,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     if (gr->frame_fence_event == nullptr) return false;
 
     gr->frame_fence_counter = 0;
-    gr->frame_fence_index = gr->swap_chain->GetCurrentBackBufferIndex();
+    gr->frame_index = 0;
 
     LOG("[graphics] Frame fence created");
 
@@ -158,6 +199,8 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 static void deinit_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
+    finish_gpu_commands(gr);
+
     SAFE_RELEASE(gr->command_list);
     for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->command_allocators[i]);
     if (gr->frame_fence_event) {
