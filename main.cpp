@@ -78,7 +78,12 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 {
     assert(gr && gr->device == nullptr);
 
+    RECT rect = {};
+    GetClientRect(window, &rect);
+
     gr->window = window;
+    gr->window_width = rect.right;
+    gr->window_height = rect.bottom;
 
     VHR(CreateDXGIFactory2(enable_d3d12_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
 
@@ -111,11 +116,6 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     VHR(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
     LOG("[graphics] Command queue created");
-
-    RECT rect = {};
-    GetClientRect(window, &rect);
-    gr->window_width = rect.right;
-    gr->window_height = rect.bottom;
 
     const DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {
         .Width = static_cast<u32>(gr->window_width),
@@ -291,9 +291,7 @@ i32 main()
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-            if (msg.message == WM_QUIT) {
-                break;
-            }
+            if (msg.message == WM_QUIT) break;
         } else {
             Sleep(1);
         }
