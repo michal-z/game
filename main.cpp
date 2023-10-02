@@ -15,6 +15,8 @@ struct GraphicsContext {
     ID3D12Device12* device;
 
     ID3D12CommandQueue* command_queue;
+    ID3D12CommandAllocator* command_allocators[num_graphics_frames];
+    ID3D12GraphicsCommandList9* command_list;
 
     IDXGISwapChain4* swap_chain;
     ID3D12Resource* swap_chain_buffers[num_graphics_frames];
