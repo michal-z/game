@@ -33,12 +33,12 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 {
     assert(gr && gr->device == nullptr);
 
-    RETURN_IF_FAIL(CreateDXGIFactory2(enable_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
+    VHR(CreateDXGIFactory2(enable_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
 
-    RETURN_IF_FAIL(gr->dxgi_factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&gr->adapter)));
+    VHR(gr->dxgi_factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&gr->adapter)));
 
     DXGI_ADAPTER_DESC3 adapter_desc = {};
-    RETURN_IF_FAIL(gr->adapter->GetDesc3(&adapter_desc));
+    VHR(gr->adapter->GetDesc3(&adapter_desc));
 
     LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
@@ -51,7 +51,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         }
     }
 
-    RETURN_IF_FAIL(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)));
+    VHR(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)));
 
     LOG("[graphics] D3D12 device created");
 
@@ -61,7 +61,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
         .NodeMask = 0,
     };
-    RETURN_IF_FAIL(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
+    VHR(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
     LOG("[graphics] Command queue created");
 
@@ -82,18 +82,15 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Flags = 0,
     };
     IDXGISwapChain1* swap_chain1 = nullptr;
-    RETURN_IF_FAIL(gr->dxgi_factory->CreateSwapChainForHwnd(gr->command_queue, window, &swap_chain_desc, nullptr, nullptr, &swap_chain1));
+    VHR(gr->dxgi_factory->CreateSwapChainForHwnd(gr->command_queue, window, &swap_chain_desc, nullptr, nullptr, &swap_chain1));
+    defer { SAFE_RELEASE(swap_chain1); };
 
-    if (FAILED(swap_chain1->QueryInterface(IID_PPV_ARGS(&gr->swap_chain)))) {
-        SAFE_RELEASE(swap_chain1);
-        return false;
-    }
-    SAFE_RELEASE(swap_chain1);
+    VHR(swap_chain1->QueryInterface(IID_PPV_ARGS(&gr->swap_chain)));
 
-    RETURN_IF_FAIL(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
+    VHR(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
     for (i32 i = 0; i < num_graphics_frames; ++i) {
-        RETURN_IF_FAIL(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
+        VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
     }
 
     LOG("[graphics] Swap chain created");
@@ -104,7 +101,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
         .NodeMask = 0,
     };
-    RETURN_IF_FAIL(gr->device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&gr->rtv_heap)));
+    VHR(gr->device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&gr->rtv_heap)));
     gr->rtv_heap_start = gr->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     gr->rtv_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
@@ -114,7 +111,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Render target view (RTV) heap created");
 
-    RETURN_IF_FAIL(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
+    VHR(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
 
     gr->frame_fence_event = CreateEventEx(nullptr, "frame_fence_event", 0, EVENT_ALL_ACCESS);
     if (gr->frame_fence_event == nullptr) return false;
@@ -208,10 +205,9 @@ i32 main()
     LOG("[graphics] Window DPI scale: %f", ImGui_ImplWin32_GetDpiScaleForHwnd(window));
 
     GraphicsContext gr = {};
-    if (!init_graphics_context(window, &gr)) {
-        deinit_graphics_context(&gr);
-        return 1;
-    }
+    defer { deinit_graphics_context(&gr); };
+
+    if (!init_graphics_context(window, &gr)) return 1;
 
     while (true) {
         MSG msg = {};
@@ -226,6 +222,5 @@ i32 main()
         }
     }
 
-    deinit_graphics_context(&gr);
     return 0;
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -39,10 +38,14 @@ using ssize = ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-#define RETURN_IF_FAIL(hr) do { \
-    if (FAILED(hr)) { \
-        OutputDebugStringA("HRESULT error detected"); \
-        assert(false); \
+#define LOG(fmt, ...) do { \
+    fprintf(stderr, (fmt), __VA_ARGS__); \
+    fprintf(stderr, " (%s:%d)\n", __FILE__, __LINE__); \
+} while(0)
+
+#define VHR(r) do { \
+    if (FAILED(r)) { \
+        LOG("[%s()] HRESULT error detected (0x%X)", __FUNCTION__, r); \
         return false; \
     } \
 } while(0)
@@ -54,7 +57,29 @@ using f64 = double;
     } \
 } while(0)
 
-#define LOG(fmt, ...) do { \
-    fprintf(stderr, (fmt), __VA_ARGS__); \
-    fprintf(stderr, " (%s:%d)\n", __FILE__, __LINE__); \
-} while(0)
+template<typename F> class defer_finalizer {
+    F func;
+    bool moved;
+public:
+    template<typename T> defer_finalizer(T&& f) : func(std::forward<T>(f)), moved(false) {}
+
+    defer_finalizer(const defer_finalizer &) = delete;
+
+    defer_finalizer(defer_finalizer&& other) : func(std::move(other.func)), moved(other.moved) {
+        other.moved = true;
+    }
+
+    ~defer_finalizer() {
+        if (!moved) func();
+    }
+};
+
+static struct {
+    template<typename F> defer_finalizer<F> operator<<(F&& f) {
+        return defer_finalizer<F>(std::forward<F>(f));
+    }
+} __deferrer;
+
+#define _TOKENPASTE(x, y) x ## y
+#define _TOKENPASTE2(x, y) _TOKENPASTE(x, y)
+#define defer auto _TOKENPASTE2(__deferred_lambda_call, __COUNTER__) = __deferrer << [&]
