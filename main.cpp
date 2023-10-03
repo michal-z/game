@@ -8,7 +8,7 @@ extern "C" {
 constexpr const char* window_name = "my_game";
 
 constexpr bool enable_d3d12_debug_layer = true;
-constexpr auto num_gpu_frames = 3;
+constexpr auto num_gpu_frames = 2;
 constexpr auto max_gpu_descriptors = 10000;
 
 struct GraphicsContext {
@@ -267,6 +267,86 @@ static HWND create_window(i32 width, i32 height)
     return window;
 }
 
+static bool draw_frame(GraphicsContext* gr)
+{
+    ID3D12CommandAllocator* command_allocator = gr->command_allocators[gr->frame_index];
+    VHR(command_allocator->Reset());
+    VHR(gr->command_list->Reset(command_allocator, nullptr));
+
+    /* Viewport */ {
+        const D3D12_VIEWPORT viewport = {
+            .TopLeftX = 0.0f,
+            .TopLeftY = 0.0f,
+            .Width = static_cast<f32>(gr->window_width),
+            .Height = static_cast<f32>(gr->window_height),
+            .MinDepth = 0.0f,
+            .MaxDepth = 0.0f,
+        };
+        gr->command_list->RSSetViewports(1, &viewport);
+    }
+    /* Scissor */ {
+        const D3D12_RECT scissor_rect = {
+            .left = 0,
+            .top = 0,
+            .right = gr->window_width,
+            .bottom = gr->window_height,
+        };
+        gr->command_list->RSSetScissorRects(1, &scissor_rect);
+    }
+
+    const u32 back_buffer_index = gr->swap_chain->GetCurrentBackBufferIndex();
+    const D3D12_CPU_DESCRIPTOR_HANDLE back_buffer_descriptor = {
+        .ptr = gr->rtv_heap_start.ptr + back_buffer_index * gr->rtv_heap_descriptor_size
+    };
+
+    {
+        const D3D12_TEXTURE_BARRIER texture_barrier = {
+            .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+            .SyncAfter = D3D12_BARRIER_SYNC_RENDER_TARGET,
+            .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+            .AccessAfter = D3D12_BARRIER_ACCESS_RENDER_TARGET,
+            .LayoutBefore = D3D12_BARRIER_LAYOUT_PRESENT,
+            .LayoutAfter = D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+            .pResource = gr->swap_chain_buffers[back_buffer_index],
+            .Subresources = { .IndexOrFirstMipLevel = 0xffffffff },
+        };
+        const D3D12_BARRIER_GROUP barrier_group = {
+            .Type = D3D12_BARRIER_TYPE_TEXTURE,
+            .NumBarriers = 1,
+            .pTextureBarriers = &texture_barrier,
+        };
+        gr->command_list->Barrier(1, &barrier_group);
+    }
+
+    gr->command_list->OMSetRenderTargets(1, &back_buffer_descriptor, TRUE, nullptr);
+    gr->command_list->ClearRenderTargetView(back_buffer_descriptor, XMVECTORF32{ 0.2f, 0.4f, 0.8f, 1.0 }, 0, nullptr);
+
+    {
+        const D3D12_TEXTURE_BARRIER texture_barrier = {
+            .SyncBefore = D3D12_BARRIER_SYNC_RENDER_TARGET,
+            .SyncAfter = D3D12_BARRIER_SYNC_NONE,
+            .AccessBefore = D3D12_BARRIER_ACCESS_RENDER_TARGET,
+            .AccessAfter = D3D12_BARRIER_ACCESS_NO_ACCESS,
+            .LayoutBefore = D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+            .LayoutAfter = D3D12_BARRIER_LAYOUT_PRESENT,
+            .pResource = gr->swap_chain_buffers[back_buffer_index],
+            .Subresources = { .IndexOrFirstMipLevel = 0xffffffff },
+        };
+        const D3D12_BARRIER_GROUP barrier_group = {
+            .Type = D3D12_BARRIER_TYPE_TEXTURE,
+            .NumBarriers = 1,
+            .pTextureBarriers = &texture_barrier,
+        };
+        gr->command_list->Barrier(1, &barrier_group);
+    }
+
+    VHR(gr->command_list->Close());
+
+    gr->command_queue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList**>(&gr->command_list));
+
+    return present_gpu_frame(gr);
+}
+
 i32 main()
 {
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -293,7 +373,7 @@ i32 main()
             DispatchMessage(&msg);
             if (msg.message == WM_QUIT) break;
         } else {
-            Sleep(1);
+            draw_frame(&gr);
         }
     }
 
