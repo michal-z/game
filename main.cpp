@@ -309,7 +309,7 @@ static bool draw_frame(GraphicsContext* gr)
         .ptr = gr->rtv_heap_start.ptr + back_buffer_index * gr->rtv_heap_descriptor_size
     };
 
-    {
+    /* D3D12_BARRIER_LAYOUT_PRESENT -> D3D12_BARRIER_LAYOUT_RENDER_TARGET */ {
         const D3D12_TEXTURE_BARRIER texture_barrier = {
             .SyncBefore = D3D12_BARRIER_SYNC_NONE,
             .SyncAfter = D3D12_BARRIER_SYNC_RENDER_TARGET,
@@ -331,7 +331,7 @@ static bool draw_frame(GraphicsContext* gr)
     gr->command_list->OMSetRenderTargets(1, &back_buffer_descriptor, TRUE, nullptr);
     gr->command_list->ClearRenderTargetView(back_buffer_descriptor, XMVECTORF32{ 0.2f, 0.4f, 0.8f, 1.0 }, 0, nullptr);
 
-    {
+    /* D3D12_BARRIER_LAYOUT_RENDER_TARGET -> D3D12_BARRIER_LAYOUT_PRESENT */ {
         const D3D12_TEXTURE_BARRIER texture_barrier = {
             .SyncBefore = D3D12_BARRIER_SYNC_RENDER_TARGET,
             .SyncAfter = D3D12_BARRIER_SYNC_NONE,
