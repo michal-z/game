@@ -193,6 +193,16 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Command list created");
 
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
+    VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
+
+    if (options12.EnhancedBarriersSupported == FALSE) {
+        LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
+        return false;
+    } else {
+        LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+    }
+
     return true;
 }
 
