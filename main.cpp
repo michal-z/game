@@ -6,6 +6,7 @@ extern "C" {
 }
 
 constexpr const char* window_name = "my_game";
+constexpr auto window_min_wh = 400;
 
 constexpr bool enable_d3d12_debug_layer = true;
 constexpr auto num_gpu_frames = 2;
@@ -42,7 +43,7 @@ struct GraphicsContext {
     u32 frame_index;
 };
 
-static bool present_gpu_frame(GraphicsContext* gr)
+static void present_gpu_frame(GraphicsContext* gr)
 {
     assert(gr && gr->device);
     gr->frame_fence_counter += 1;
@@ -57,11 +58,9 @@ static bool present_gpu_frame(GraphicsContext* gr)
     }
 
     gr->frame_index = (gr->frame_index + 1) % num_gpu_frames;
-
-    return true;
 }
 
-static bool finish_gpu_commands(GraphicsContext* gr)
+static void finish_gpu_commands(GraphicsContext* gr)
 {
     assert(gr && gr->device);
     gr->frame_fence_counter += 1;
@@ -70,6 +69,28 @@ static bool finish_gpu_commands(GraphicsContext* gr)
     VHR(gr->frame_fence->SetEventOnCompletion(gr->frame_fence_counter, gr->frame_fence_event));
 
     WaitForSingleObject(gr->frame_fence_event, INFINITE);
+}
+
+static bool handle_window_resize(GraphicsContext* gr)
+{
+    assert(gr && gr->device);
+
+    RECT current_rect = {};
+    GetClientRect(gr->window, &current_rect);
+
+    if (current_rect.right == 0 && current_rect.bottom == 0) {
+        // Window is minimized
+        Sleep(10);
+        return false; // Do not render the frame.
+    }
+
+    if (current_rect.right != gr->window_width || current_rect.bottom != gr->window_height) {
+        assert(current_rect.right >= window_min_wh / 2);
+        assert(current_rect.bottom >= window_min_wh / 2);
+        LOG("[graphics] Window resized to %dx%d", current_rect.right, current_rect.bottom);
+
+        finish_gpu_commands(gr);
+    }
 
     return true;
 }
@@ -103,7 +124,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         }
     }
 
-    VHR(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)));
+    if (FAILED(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)))) return false;
 
     LOG("[graphics] D3D12 device created");
 
@@ -243,8 +264,8 @@ static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM
         } break;
         case WM_GETMINMAXINFO: {
             auto info = reinterpret_cast<MINMAXINFO*>(lparam);
-            info->ptMinTrackSize.x = 400;
-            info->ptMinTrackSize.y = 400;
+            info->ptMinTrackSize.x = window_min_wh;
+            info->ptMinTrackSize.y = window_min_wh;
             return 0;
         } break;
     }
@@ -277,7 +298,7 @@ static HWND create_window(i32 width, i32 height)
     return window;
 }
 
-static bool draw_frame(GraphicsContext* gr)
+static void draw_frame(GraphicsContext* gr)
 {
     ID3D12CommandAllocator* command_allocator = gr->command_allocators[gr->frame_index];
     VHR(command_allocator->Reset());
@@ -354,7 +375,7 @@ static bool draw_frame(GraphicsContext* gr)
 
     gr->command_queue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList**>(&gr->command_list));
 
-    return present_gpu_frame(gr);
+    present_gpu_frame(gr);
 }
 
 i32 main()
@@ -374,7 +395,10 @@ i32 main()
     GraphicsContext gr = {};
     defer { deinit_graphics_context(&gr); };
 
-    if (!init_graphics_context(window, &gr)) return 1;
+    if (!init_graphics_context(window, &gr)) {
+        // TODO: Display message box in release mode.
+        return 1;
+    }
 
     while (true) {
         MSG msg = {};
@@ -383,6 +407,7 @@ i32 main()
             DispatchMessage(&msg);
             if (msg.message == WM_QUIT) break;
         } else {
+            if (!handle_window_resize(&gr)) continue;
             draw_frame(&gr);
         }
     }

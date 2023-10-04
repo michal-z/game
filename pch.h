@@ -43,10 +43,11 @@ using f64 = double;
     fprintf(stderr, " (%s:%d)\n", __FILE__, __LINE__); \
 } while(0)
 
+// TODO: Display message box in release mode and terminate(?).
 #define VHR(r) do { \
     if (FAILED(r)) { \
         LOG("[%s()] HRESULT error detected (0x%X)", __FUNCTION__, r); \
-        return false; \
+        assert(false); \
     } \
 } while(0)
 
