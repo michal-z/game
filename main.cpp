@@ -90,9 +90,24 @@ static bool handle_window_resize(GraphicsContext* gr)
         LOG("[graphics] Window resized to %dx%d", current_rect.right, current_rect.bottom);
 
         finish_gpu_commands(gr);
+
+        for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
+
+        VHR(gr->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0));
+
+        for (i32 i = 0; i < num_gpu_frames; ++i) {
+            VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
+        }
+
+        for (i32 i = 0; i < num_gpu_frames; ++i) {
+            gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
+        }
+
+        gr->window_width = current_rect.right;
+        gr->window_height = current_rect.bottom;
     }
 
-    return true;
+    return true; // Render normally.
 }
 
 static bool init_graphics_context(HWND window, GraphicsContext* gr)
