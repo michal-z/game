@@ -5,7 +5,7 @@ extern "C" {
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
-constexpr const char* window_name = "my_game";
+constexpr const char* window_name = "game";
 constexpr auto window_min_wh = 400;
 
 constexpr bool enable_d3d12_debug_layer = true;
@@ -26,6 +26,8 @@ struct GraphicsContext {
     ID3D12GraphicsCommandList9* command_list;
 
     IDXGISwapChain4* swap_chain;
+    UINT swap_chain_flags;
+    UINT swap_chain_present_interval;
     ID3D12Resource* swap_chain_buffers[num_gpu_frames];
 
     ID3D12DescriptorHeap* rtv_heap;
@@ -48,7 +50,12 @@ static void present_gpu_frame(GraphicsContext* gr)
     assert(gr && gr->device);
     gr->frame_fence_counter += 1;
 
-    VHR(gr->swap_chain->Present(0, 0));
+    UINT present_flags = 0;
+
+    if (gr->swap_chain_present_interval == 0 && gr->swap_chain_flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING)
+        present_flags |= DXGI_PRESENT_ALLOW_TEARING;
+
+    VHR(gr->swap_chain->Present(gr->swap_chain_present_interval, present_flags));
     VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
 
     const u64 gpu_frame_counter = gr->frame_fence->GetCompletedValue();
@@ -93,7 +100,7 @@ static bool handle_window_resize(GraphicsContext* gr)
 
         for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
 
-        VHR(gr->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0));
+        VHR(gr->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, gr->swap_chain_flags));
 
         for (i32 i = 0; i < num_gpu_frames; ++i) {
             VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
@@ -121,6 +128,9 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     gr->window_width = rect.right;
     gr->window_height = rect.bottom;
 
+    //
+    // Factory, adapater, device
+    //
     VHR(CreateDXGIFactory2(enable_d3d12_debug_layer ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gr->dxgi_factory)));
 
     VHR(gr->dxgi_factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&gr->adapter)));
@@ -143,6 +153,22 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] D3D12 device created");
 
+    //
+    // Check required features support
+    //
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
+    VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
+
+    if (options12.EnhancedBarriersSupported == FALSE) {
+        LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
+        return false;
+    } else {
+        LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+    }
+
+    //
+    // Commands
+    //
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
         .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
@@ -152,6 +178,31 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     VHR(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
     LOG("[graphics] Command queue created");
+
+    for (i32 i = 0; i < num_gpu_frames; ++i) {
+        VHR(gr->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gr->command_allocators[i])));
+    }
+
+    LOG("[graphics] Command allocators created");
+
+    VHR(gr->device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&gr->command_list)));
+
+    LOG("[graphics] Command list created");
+
+    //
+    // Swap chain
+    //
+    /* Swap chain flags */ {
+        gr->swap_chain_flags = 0;
+        gr->swap_chain_present_interval = 0;
+
+        BOOL allow_tearing = FALSE;
+        const HRESULT hr = gr->dxgi_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
+
+        if (SUCCEEDED(hr) && allow_tearing == TRUE) {
+            gr->swap_chain_flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        }
+    }
 
     const DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {
         .Width = static_cast<u32>(gr->window_width),
@@ -164,7 +215,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Scaling = DXGI_SCALING_NONE,
         .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
         .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,
-        .Flags = 0,
+        .Flags = gr->swap_chain_flags,
     };
     IDXGISwapChain1* swap_chain1 = nullptr;
     VHR(gr->dxgi_factory->CreateSwapChainForHwnd(gr->command_queue, window, &swap_chain_desc, nullptr, nullptr, &swap_chain1));
@@ -180,6 +231,9 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Swap chain created");
 
+    //
+    // RTV descriptor heap
+    //
     const D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {
         .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
         .NumDescriptors = 1024,
@@ -196,6 +250,9 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Render target view (RTV) descriptor heap created");
 
+    //
+    // CBV, SRV, UAV descriptor heap
+    //
     const D3D12_DESCRIPTOR_HEAP_DESC gpu_heap_desc = {
         .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         .NumDescriptors = max_gpu_descriptors,
@@ -209,6 +266,9 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] GPU descriptor heap (CBV_SRV_UAV, SHADER_VISIBLE) created");
 
+    //
+    // Frame fence
+    //
     VHR(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
 
     gr->frame_fence_event = CreateEventEx(nullptr, "frame_fence_event", 0, EVENT_ALL_ACCESS);
@@ -218,26 +278,6 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     gr->frame_index = 0;
 
     LOG("[graphics] Frame fence created");
-
-    for (i32 i = 0; i < num_gpu_frames; ++i) {
-        VHR(gr->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gr->command_allocators[i])));
-    }
-
-    LOG("[graphics] Command allocators created");
-
-    VHR(gr->device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&gr->command_list)));
-
-    LOG("[graphics] Command list created");
-
-    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
-    VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
-
-    if (options12.EnhancedBarriersSupported == FALSE) {
-        LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
-        return false;
-    } else {
-        LOG("[graphics] Enhanced Barriers API is SUPPORTED");
-    }
 
     return true;
 }
@@ -393,6 +433,44 @@ static void draw_frame(GraphicsContext* gr)
     present_gpu_frame(gr);
 }
 
+static f64 get_time() {
+    static LARGE_INTEGER start_counter;
+    static LARGE_INTEGER frequency;
+    if (start_counter.QuadPart == 0) {
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start_counter);
+    }
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
+}
+
+void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) {
+    static f64 previous_time = -1.0;
+    static f64 header_refresh_time = 0.0;
+    static u32 num_frames = 0;
+
+    if (previous_time < 0.0) {
+        previous_time = get_time();
+        header_refresh_time = previous_time;
+    }
+
+    *out_time = get_time();
+    *out_delta_time = static_cast<f32>(*out_time - previous_time);
+    previous_time = *out_time;
+
+    if ((*out_time - header_refresh_time) >= 1.0) {
+        const f64 fps = num_frames / (*out_time - header_refresh_time);
+        const f64 ms = (1.0 / fps) * 1000.0;
+        char header[128];
+        snprintf(header, sizeof(header), "[%.1f fps  %.3f ms] %s", fps, ms, name);
+        SetWindowText(window, header);
+        header_refresh_time = *out_time;
+        num_frames = 0;
+    }
+    num_frames++;
+}
+
 i32 main()
 {
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -423,6 +501,11 @@ i32 main()
             if (msg.message == WM_QUIT) break;
         } else {
             if (!handle_window_resize(&gr)) continue;
+
+            f64 time;
+            f32 delta_time;
+            update_frame_stats(gr.window, window_name, &time, &delta_time);
+
             draw_frame(&gr);
         }
     }
