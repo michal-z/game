@@ -8,7 +8,7 @@ extern "C" {
 constexpr const char* window_name = "game";
 constexpr auto window_min_wh = 400;
 
-constexpr bool enable_d3d12_debug_layer = true;
+constexpr bool enable_d3d12_debug_layer = false;
 constexpr auto num_gpu_frames = 2;
 constexpr auto max_gpu_descriptors = 10000;
 
@@ -272,7 +272,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     VHR(gr->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gr->frame_fence)));
 
     gr->frame_fence_event = CreateEventEx(nullptr, "frame_fence_event", 0, EVENT_ALL_ACCESS);
-    if (gr->frame_fence_event == nullptr) return false;
+    if (gr->frame_fence_event == nullptr) VHR(HRESULT_FROM_WIN32(GetLastError()));
 
     gr->frame_fence_counter = 0;
     gr->frame_index = 0;
