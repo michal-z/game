@@ -88,7 +88,7 @@ static bool handle_window_resize(GraphicsContext* gr)
     if (current_rect.right == 0 && current_rect.bottom == 0) {
         // Window is minimized
         Sleep(10);
-        return false; // Do not render the frame.
+        return false; // Do not render.
     }
 
     if (current_rect.right != gr->window_width || current_rect.bottom != gr->window_height) {
@@ -162,8 +162,17 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     if (options12.EnhancedBarriersSupported == FALSE) {
         LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
         return false;
-    } else {
-        LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+    }
+    LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+
+    /* Shader Model 6.6 support */ {
+        D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_HIGHEST_SHADER_MODEL };
+        const HRESULT hr = gr->device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data));
+        if (FAILED(hr) || data.HighestShaderModel < D3D_SHADER_MODEL_6_6) {
+            LOG("[graphics] Shader Model 6.6 is NOT SUPPORTED - please update your driver");
+            return false;
+        }
+        LOG("[graphics] Shader Model 6.6 is SUPPORTED");
     }
 
     //
