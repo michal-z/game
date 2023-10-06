@@ -156,19 +156,28 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     // Check required features support
     //
-    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
-    VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
+    {
+        D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+        D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
+        D3D12_FEATURE_DATA_SHADER_MODEL shader_model = { .HighestShaderModel = D3D_HIGHEST_SHADER_MODEL };
 
-    if (options12.EnhancedBarriersSupported == FALSE) {
-        LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
-        return false;
-    }
-    LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+        VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
+        VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
+        VHR(gr->device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shader_model, sizeof(shader_model)));
 
-    /* Shader Model 6.6 support */ {
-        D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_HIGHEST_SHADER_MODEL };
-        const HRESULT hr = gr->device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data));
-        if (FAILED(hr) || data.HighestShaderModel < D3D_SHADER_MODEL_6_6) {
+        if (options.ResourceBindingTier < D3D12_RESOURCE_BINDING_TIER_3) {
+            LOG("[graphics] Resource Binding Tier 3 is NOT SUPPORTED - please update your driver");
+            return false;
+        }
+        LOG("[graphics] Resource Binding Tier 3 is SUPPORTED");
+
+        if (options12.EnhancedBarriersSupported == FALSE) {
+            LOG("[graphics] Enhanced Barriers API is NOT SUPPORTED - please update your driver");
+            return false;
+        }
+        LOG("[graphics] Enhanced Barriers API is SUPPORTED");
+
+        if (shader_model.HighestShaderModel < D3D_SHADER_MODEL_6_6) {
             LOG("[graphics] Shader Model 6.6 is NOT SUPPORTED - please update your driver");
             return false;
         }
