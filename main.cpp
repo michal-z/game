@@ -212,7 +212,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     /* Swap chain flags */ {
         gr->swap_chain_flags = 0;
-        gr->swap_chain_present_interval = 0;
+        gr->swap_chain_present_interval = 1;
 
         BOOL allow_tearing = FALSE;
         const HRESULT hr = gr->dxgi_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
@@ -324,6 +324,11 @@ static void deinit_graphics_context(GraphicsContext* gr)
 
 static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    const LRESULT imgui_result = ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
+    if (imgui_result != 0)
+        return imgui_result;
+
     switch (message) {
         case WM_KEYDOWN: {
             if (wparam == VK_ESCAPE) {
@@ -379,6 +384,8 @@ static void draw_frame(GraphicsContext* gr)
     VHR(command_allocator->Reset());
     VHR(gr->command_list->Reset(command_allocator, nullptr));
 
+    gr->command_list->SetDescriptorHeaps(1, &gr->gpu_heap);
+
     /* Viewport */ {
         const D3D12_VIEWPORT viewport = {
             .TopLeftX = 0.0f,
@@ -426,6 +433,8 @@ static void draw_frame(GraphicsContext* gr)
 
     gr->command_list->OMSetRenderTargets(1, &back_buffer_descriptor, TRUE, nullptr);
     gr->command_list->ClearRenderTargetView(back_buffer_descriptor, XMVECTORF32{ 0.2f, 0.4f, 0.8f, 1.0 }, 0, nullptr);
+
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gr->command_list);
 
     /* D3D12_BARRIER_LAYOUT_RENDER_TARGET -> D3D12_BARRIER_LAYOUT_PRESENT */ {
         const D3D12_TEXTURE_BARRIER texture_barrier = {
@@ -503,7 +512,8 @@ i32 main()
     }
 
     const HWND window = create_window(1200, 800);
-    LOG("[graphics] Window DPI scale: %f", ImGui_ImplWin32_GetDpiScaleForHwnd(window));
+    const f32 dpi_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(window);
+    LOG("[graphics] Window DPI scale: %f", dpi_scale);
 
     GraphicsContext gr = {};
     defer { deinit_graphics_context(&gr); };
@@ -512,6 +522,19 @@ i32 main()
         // TODO: Display message box in release mode.
         return 1;
     }
+
+    ImGui::CreateContext();
+    defer { ImGui::DestroyContext(); };
+
+    ImGui::GetIO().Fonts->AddFontFromFileTTF("Roboto-Medium.ttf", floor(16.0f * dpi_scale));
+
+    if (!ImGui_ImplWin32_Init(window)) return 1;
+    defer { ImGui_ImplWin32_Shutdown(); };
+
+    if (!ImGui_ImplDX12_Init(gr.device, num_gpu_frames, DXGI_FORMAT_R8G8B8A8_UNORM, gr.gpu_heap, gr.gpu_heap_start_cpu, gr.gpu_heap_start_gpu)) return 1;
+    defer { ImGui_ImplDX12_Shutdown(); };
+
+    ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
     while (true) {
         MSG msg = {};
@@ -525,6 +548,14 @@ i32 main()
             f64 time;
             f32 delta_time;
             update_frame_stats(gr.window, window_name, &time, &delta_time);
+
+            ImGui_ImplDX12_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+
+            ImGui::ShowDemoWindow();
+
+            ImGui::Render();
 
             draw_frame(&gr);
         }

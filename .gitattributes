@@ -2,3 +2,4 @@
 *.* text eol=crlf
 
 *.dll binary
+*.ttf binary
