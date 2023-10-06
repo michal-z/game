@@ -354,7 +354,8 @@ static HWND create_window(i32 width, i32 height)
         .hCursor = LoadCursor(nullptr, IDC_ARROW),
         .lpszClassName = window_name,
     };
-    if (!RegisterClassEx(&winclass)) return nullptr;
+    if (!RegisterClassEx(&winclass))
+        VHR(HRESULT_FROM_WIN32(GetLastError()));
 
     LOG("[core] Window class registered");
 
@@ -364,7 +365,8 @@ static HWND create_window(i32 width, i32 height)
     AdjustWindowRectEx(&rect, style, FALSE, 0);
 
     const HWND window = CreateWindowEx(0, window_name, window_name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
-    if (!window) return nullptr;
+    if (!window)
+        VHR(HRESULT_FROM_WIN32(GetLastError()));
 
     LOG("[core] Window created");
 
@@ -463,7 +465,7 @@ static f64 get_time() {
     return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
 }
 
-void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) {
+static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) {
     static f64 previous_time = -1.0;
     static f64 header_refresh_time = 0.0;
     static u32 num_frames = 0;
