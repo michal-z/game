@@ -32,6 +32,7 @@ struct GraphicsContext {
     ID3D12DebugDevice2* debug_device;
     ID3D12DebugCommandQueue1* debug_command_queue;
     ID3D12DebugCommandList3* debug_command_list;
+    ID3D12InfoQueue1* debug_info_queue;
 #endif
 
     IDXGISwapChain4* swap_chain;
@@ -52,6 +53,8 @@ struct GraphicsContext {
     HANDLE frame_fence_event;
     u64 frame_fence_counter;
     u32 frame_index;
+
+    ID3D12Resource2* msaa_srgb_rt;
 };
 
 static void present_gpu_frame(GraphicsContext* gr)
@@ -163,6 +166,8 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
 #if ENBALE_D3D12_DEBUG_LAYER == 1
     VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_device)));
+    VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_info_queue)));
+    VHR(gr->debug_info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE));
 #endif
 
     LOG("[graphics] D3D12 device created");
@@ -249,7 +254,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Height = static_cast<u32>(gr->window_height),
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
         .Stereo = FALSE,
-        .SampleDesc = { .Count = 1, .Quality = 0 },
+        .SampleDesc = { .Count = 1 },
         .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
         .BufferCount = num_gpu_frames,
         .Scaling = DXGI_SCALING_NONE,
@@ -319,6 +324,31 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Frame fence created");
 
+    //
+    // MSAA, SRGB render target
+    //
+    {
+        const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_DEFAULT };
+        const D3D12_RESOURCE_DESC1 desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            .Width = static_cast<u64>(gr->window_width),
+            .Height = static_cast<u32>(gr->window_height),
+            .DepthOrArraySize = 1,
+            .MipLevels = 1,
+            .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+            .SampleDesc = { .Count = 8 },
+            .Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+        };
+        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_RENDER_TARGET, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&gr->msaa_srgb_rt)));
+
+        gr->device->CreateRenderTargetView(gr->msaa_srgb_rt, nullptr, { .ptr = gr->rtv_heap_start.ptr + num_gpu_frames * gr->rtv_heap_descriptor_size });
+    }
+
+#if ENBALE_D3D12_DEBUG_LAYER == 1
+    gr->debug_command_queue->AssertResourceAccess(gr->msaa_srgb_rt, 0, D3D12_BARRIER_ACCESS_COMMON);
+    gr->debug_command_queue->AssertTextureLayout(gr->msaa_srgb_rt, 0, D3D12_BARRIER_LAYOUT_RENDER_TARGET);
+#endif
+
     return true;
 }
 
@@ -327,6 +357,7 @@ static void deinit_graphics_context(GraphicsContext* gr)
     assert(gr);
     finish_gpu_commands(gr);
 
+    SAFE_RELEASE(gr->msaa_srgb_rt);
     SAFE_RELEASE(gr->command_list);
     for (i32 i = 0; i < num_gpu_frames; ++i) SAFE_RELEASE(gr->command_allocators[i]);
     if (gr->frame_fence_event) {
@@ -346,17 +377,24 @@ static void deinit_graphics_context(GraphicsContext* gr)
 #if ENBALE_D3D12_DEBUG_LAYER == 1
     SAFE_RELEASE(gr->debug_command_list);
     SAFE_RELEASE(gr->debug_command_queue);
+    SAFE_RELEASE(gr->debug_info_queue);
     SAFE_RELEASE(gr->debug);
 
-    if (gr->debug_device)
+    if (gr->debug_device) {
         VHR(gr->debug_device->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL));
-    SAFE_RELEASE(gr->debug_device);
+
+        const auto refcount = gr->debug_device->Release();
+        assert(refcount == 0);
+
+        gr->debug_device = nullptr;
+    }
 #endif
 }
 
 static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
     const LRESULT imgui_result = ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
     if (imgui_result != 0)
         return imgui_result;
@@ -439,15 +477,11 @@ static void draw_frame(GraphicsContext* gr)
         gr->command_list->RSSetScissorRects(1, &scissor_rect);
     }
 
-    const D3D12_CPU_DESCRIPTOR_HANDLE back_buffer_descriptor = {
-        .ptr = gr->rtv_heap_start.ptr + gr->frame_index * gr->rtv_heap_descriptor_size
-    };
-
     /* D3D12_BARRIER_LAYOUT_PRESENT -> D3D12_BARRIER_LAYOUT_RENDER_TARGET */ {
         const D3D12_TEXTURE_BARRIER texture_barrier = {
-            .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+            .SyncBefore = D3D12_BARRIER_SYNC_RENDER_TARGET,
             .SyncAfter = D3D12_BARRIER_SYNC_RENDER_TARGET,
-            .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+            .AccessBefore = D3D12_BARRIER_ACCESS_COMMON,
             .AccessAfter = D3D12_BARRIER_ACCESS_RENDER_TARGET,
             .LayoutBefore = D3D12_BARRIER_LAYOUT_PRESENT,
             .LayoutAfter = D3D12_BARRIER_LAYOUT_RENDER_TARGET,
@@ -462,6 +496,10 @@ static void draw_frame(GraphicsContext* gr)
         gr->command_list->Barrier(1, &barrier_group);
     }
 
+    const D3D12_CPU_DESCRIPTOR_HANDLE back_buffer_descriptor = {
+        .ptr = gr->rtv_heap_start.ptr + gr->frame_index * gr->rtv_heap_descriptor_size
+    };
+
     gr->command_list->OMSetRenderTargets(1, &back_buffer_descriptor, TRUE, nullptr);
     gr->command_list->ClearRenderTargetView(back_buffer_descriptor, XMVECTORF32{ 0.2f, 0.4f, 0.8f, 1.0 }, 0, nullptr);
 
@@ -470,9 +508,9 @@ static void draw_frame(GraphicsContext* gr)
     /* D3D12_BARRIER_LAYOUT_RENDER_TARGET -> D3D12_BARRIER_LAYOUT_PRESENT */ {
         const D3D12_TEXTURE_BARRIER texture_barrier = {
             .SyncBefore = D3D12_BARRIER_SYNC_RENDER_TARGET,
-            .SyncAfter = D3D12_BARRIER_SYNC_NONE,
+            .SyncAfter = D3D12_BARRIER_SYNC_RENDER_TARGET,
             .AccessBefore = D3D12_BARRIER_ACCESS_RENDER_TARGET,
-            .AccessAfter = D3D12_BARRIER_ACCESS_NO_ACCESS,
+            .AccessAfter = D3D12_BARRIER_ACCESS_COMMON,
             .LayoutBefore = D3D12_BARRIER_LAYOUT_RENDER_TARGET,
             .LayoutAfter = D3D12_BARRIER_LAYOUT_PRESENT,
             .pResource = gr->swap_chain_buffers[gr->frame_index],
