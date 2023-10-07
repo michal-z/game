@@ -5,13 +5,14 @@ extern "C" {
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
+#define ENBALE_D3D12_DEBUG_LAYER 0
+#define ENBALE_D3D12_VSYNC 1
+
 constexpr const char* window_name = "game";
 constexpr auto window_min_wh = 400;
 
 constexpr auto num_gpu_frames = 2;
 constexpr auto max_gpu_descriptors = 10000;
-
-#define ENBALE_D3D12_DEBUG_LAYER 0
 
 struct GraphicsContext {
     HWND window;
@@ -233,7 +234,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     /* Swap chain flags */ {
         gr->swap_chain_flags = 0;
-        gr->swap_chain_present_interval = 1;
+        gr->swap_chain_present_interval = ENBALE_D3D12_VSYNC;
 
         BOOL allow_tearing = FALSE;
         const HRESULT hr = gr->dxgi_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
