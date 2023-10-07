@@ -11,7 +11,7 @@ constexpr auto window_min_wh = 400;
 constexpr auto num_gpu_frames = 2;
 constexpr auto max_gpu_descriptors = 10000;
 
-#define ENBALE_D3D12_DEBUG_LAYER 1
+#define ENBALE_D3D12_DEBUG_LAYER 0
 
 struct GraphicsContext {
     HWND window;
@@ -347,7 +347,8 @@ static void deinit_graphics_context(GraphicsContext* gr)
     SAFE_RELEASE(gr->debug_command_queue);
     SAFE_RELEASE(gr->debug);
 
-    VHR(gr->debug_device->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL));
+    if (gr->debug_device)
+        VHR(gr->debug_device->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL));
     SAFE_RELEASE(gr->debug_device);
 #endif
 }
