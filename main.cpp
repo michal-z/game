@@ -5,7 +5,7 @@ extern "C" {
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
-#define ENBALE_D3D12_DEBUG_LAYER 0
+#define ENBALE_D3D12_DEBUG_LAYER 1
 #define ENBALE_D3D12_VSYNC 1
 
 constexpr const char* window_name = "game";
@@ -158,7 +158,10 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
 #if ENBALE_D3D12_DEBUG_LAYER == 1
-    VHR(D3D12GetDebugInterface(IID_PPV_ARGS(&gr->debug)));
+    if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&gr->debug)))) {
+        LOG("[graphics] Failed to load D3D12 debug layer. Please rebuild with `ENBALE_D3D12_DEBUG_LAYER 0` and try again.");
+        return false;
+    }
     gr->debug->EnableDebugLayer();
 #endif
 
@@ -588,7 +591,7 @@ i32 main()
     ImGui::CreateContext();
     defer { ImGui::DestroyContext(); };
 
-    ImGui::GetIO().Fonts->AddFontFromFileTTF("Roboto-Medium.ttf", floor(16.0f * dpi_scale));
+    ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
 
     if (!ImGui_ImplWin32_Init(window)) return 1;
     defer { ImGui_ImplWin32_Shutdown(); };
