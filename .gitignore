@@ -2,6 +2,7 @@
 *.pch
 *.lib
 *.exe
+*.cso
 imgui.ini
 .vs
 !d3d12/D3D12Core.pdb

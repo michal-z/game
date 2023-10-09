@@ -4,7 +4,7 @@ setlocal enableextensions enabledelayedexpansion
 set NAME=game
 set CONFIG=D
 
-set C_FLAGS=/std:c++20 /W4 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
+set CPP_FLAGS=/std:c++20 /W4 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
  /I"external/d3d12"^
@@ -12,8 +12,8 @@ set C_FLAGS=/std:c++20 /W4 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /I"external/directxmath"^
  /I"external"
 
-if %CONFIG%==D set C_FLAGS=%C_FLAGS% /GS /Zi /Od /D"_DEBUG" /MTd /RTCs
-if %CONFIG%==R set C_FLAGS=%C_FLAGS% /O2 /Gy /MT /D"NDEBUG" /Oi /Ot /GS-
+if %CONFIG%==D set CPP_FLAGS=%CPP_FLAGS% /GS /Zi /Od /D"_DEBUG" /MTd /RTCs
+if %CONFIG%==R set CPP_FLAGS=%CPP_FLAGS% /O2 /Gy /MT /D"NDEBUG" /Oi /Ot /GS-
 
 set LIB_FLAGS=/NOLOGO
 if %CONFIG%==D set LIB_FLAGS=%LIB_FLAGS%
@@ -22,6 +22,12 @@ if %CONFIG%==R set LIB_FLAGS=%LIB_FLAGS%
 set LINK_FLAGS=/INCREMENTAL:NO /OUT:%NAME%.exe
 if %CONFIG%==D set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 if %CONFIG%==R set LINK_FLAGS=%LINK_FLAGS%
+
+set DXC="d3d12/dxc.exe"
+set CSO_OUT_DIR="assets"
+set HLSL_FLAGS=/WX /Ges /HV 2021 /nologo
+if %CONFIG%==D set HLSL_FLAGS=%HLSL_FLAGS% /Od /Zi /Qembed_debug
+if %CONFIG%==R set HLSL_FLAGS=%HLSL_FLAGS% /O3
 
 set SRC_IMGUI_ROOT=external/imgui
 set SRC_IMGUI=%SRC_IMGUI_ROOT%/imgui.cpp^
@@ -181,13 +187,13 @@ IF "%1"=="clean" (
 IF EXIST %NAME%.exe DEL %NAME%.exe
 
 IF NOT EXIST imgui.lib (
- cl %C_FLAGS% /c %SRC_IMGUI%
+ cl %CPP_FLAGS% /c %SRC_IMGUI%
  lib %LIB_FLAGS% *.obj /OUT:"imgui.lib"
  IF EXIST *.obj DEL *.obj
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT EXIST jolt.lib (
- cl %C_FLAGS% /c %SRC_JOLT%^
+ cl %CPP_FLAGS% /c %SRC_JOLT%^
   /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
   /D"JPH_DEBUG_RENDERER"
  lib %LIB_FLAGS% *.obj /OUT:"jolt.lib"
@@ -195,13 +201,18 @@ IF NOT EXIST jolt.lib (
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT EXIST pch.pch (
- cl %C_FLAGS% /Fo"pch.lib" /c /Yc"pch.h" "pch.cpp"
+ cl %CPP_FLAGS% /Fo"pch.lib" /c /Yc"pch.h" "pch.cpp"
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT "%1"=="hlsl" (
- cl %C_FLAGS% /Yu"pch.h" main.cpp /link %LINK_FLAGS%^
+ cl %CPP_FLAGS% /Yu"pch.h" main.cpp /link %LINK_FLAGS%^
   pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib
 ) & if ERRORLEVEL 1 GOTO error
+
+IF "%1"=="hlsl" (
+ %DXC% %HLSL_FLAGS% /T vs_6_6 /E s00_vs /D_S00 shaders.hlsl /Fo %CSO_OUT_DIR%/s00_vs.cso
+ %DXC% %HLSL_FLAGS% /T ps_6_6 /E s00_ps /D_S00 shaders.hlsl /Fo %CSO_OUT_DIR%/s00_ps.cso
+)
 
 GOTO end
 
