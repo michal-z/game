@@ -114,6 +114,8 @@ static void create_msaa_srgb_render_target(GraphicsContext* gr)
     VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_RENDER_TARGET, &clear_value, nullptr, 0, nullptr, IID_PPV_ARGS(&gr->msaa_srgb_rt)));
 
     gr->device->CreateRenderTargetView(gr->msaa_srgb_rt, nullptr, { .ptr = gr->rtv_heap_start.ptr + NUM_GPU_FRAMES * gr->rtv_heap_descriptor_size });
+
+    LOG("[graphics] MSAAx%d SRGB render target created", NUM_MSAA_SAMPLES);
 }
 
 static bool handle_window_resize(GraphicsContext* gr)
@@ -600,7 +602,8 @@ static void draw_frame(GraphicsContext* gr)
     present_gpu_frame(gr);
 }
 
-static f64 get_time() {
+static f64 get_time()
+{
     static LARGE_INTEGER start_counter;
     static LARGE_INTEGER frequency;
     if (start_counter.QuadPart == 0) {
@@ -612,7 +615,8 @@ static f64 get_time() {
     return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
 }
 
-static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) {
+static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time)
+{
     static f64 previous_time = -1.0;
     static f64 header_refresh_time = 0.0;
     static u32 num_frames = 0;
