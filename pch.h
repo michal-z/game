@@ -34,7 +34,7 @@ using i32 = int32_t;
 using i16 = int16_t;
 using i8 = int8_t;
 using usize = size_t;
-using ssize = ptrdiff_t;
+using isize = ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
