@@ -529,7 +529,7 @@ struct GameState {
 
 static void draw(GameState* game_state);
 
-static void draw_with_msaa(GameState* game_state)
+static void draw_frame(GameState* game_state)
 {
     assert(game_state);
 
@@ -791,7 +791,7 @@ i32 main()
             if (msg.message == WM_QUIT) break;
         } else {
             update(&game_state);
-            draw_with_msaa(&game_state);
+            draw_frame(&game_state);
         }
     }
 
