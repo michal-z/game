@@ -6,6 +6,7 @@ extern "C" {
 }
 
 #define ENBALE_D3D12_DEBUG_LAYER 1
+#define ENBALE_D3D12_GPU_BASED_VALIDATION 0
 #define ENBALE_D3D12_VSYNC 1
 
 #define WINDOW_NAME "game"
@@ -83,7 +84,7 @@ static void present_gpu_frame(GraphicsContext* gr)
 
 static void finish_gpu_commands(GraphicsContext* gr)
 {
-    assert(gr);
+    assert(gr && gr->device);
 
     gr->frame_fence_counter += 1;
 
@@ -195,6 +196,11 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         return false;
     }
     gr->debug->EnableDebugLayer();
+    LOG("[graphics] D3D12 Debug Layer enabled");
+#if ENBALE_D3D12_GPU_BASED_VALIDATION == 1
+    gr->debug->SetEnableGPUBasedValidation(TRUE);
+    LOG("[graphics] D3D12 GPU-Based Validation enabled");
+#endif
 #endif
 
     if (FAILED(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)))) return false;
