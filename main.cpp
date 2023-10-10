@@ -502,9 +502,28 @@ static void update_frame_stats(HWND window, const char* name, f64* out_time, f32
     num_frames++;
 }
 
+static std::vector<u8> load_file(const char* filename)
+{
+    FILE* file = fopen(filename, "rb");
+    assert(file);
+    fseek(file, 0, SEEK_END);
+    const i32 size_in_bytes = ftell(file);
+    assert(size_in_bytes > 0);
+    fseek(file, 0, SEEK_SET);
+    std::vector<u8> data(size_in_bytes);
+    const usize num_read_bytes = fread(&data[0], 1, size_in_bytes, file);
+    fclose(file);
+    assert(size_in_bytes == num_read_bytes);
+    return data;
+}
+
+#define NUM_GPU_PIPELINES 1
+
 struct GameState {
     GraphicsContext gr;
     ID3D12Resource2* vertex_buffer;
+    ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
+    ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
     bool is_window_minimized;
 };
 
@@ -670,13 +689,42 @@ static void init(GameState* game_state)
         VHR(E_FAIL);
     }
 
+    GraphicsContext* gr = &game_state->gr;
+
     ImGui::CreateContext();
     ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
 
     if (!ImGui_ImplWin32_Init(window)) VHR(E_FAIL);
-    if (!ImGui_ImplDX12_Init(game_state->gr.device, NUM_GPU_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, game_state->gr.gpu_heap, game_state->gr.gpu_heap_start_cpu, game_state->gr.gpu_heap_start_gpu)) VHR(E_FAIL);
+    if (!ImGui_ImplDX12_Init(gr->device, NUM_GPU_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gr->gpu_heap, gr->gpu_heap_start_cpu, gr->gpu_heap_start_gpu)) VHR(E_FAIL);
 
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
+
+    {
+        const std::vector<u8> vs = load_file("assets/s00_vs.cso");
+        const std::vector<u8> ps = load_file("assets/s00_ps.cso");
+
+        const D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {
+            .VS = { vs.data(), vs.size() },
+            .PS = { ps.data(), ps.size() },
+            .BlendState = {
+                .RenderTarget = {
+                    { .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }
+                },
+            },
+            .SampleMask = 0xffffffff,
+            .RasterizerState = {
+                .FillMode = D3D12_FILL_MODE_SOLID,
+                .CullMode = D3D12_CULL_MODE_NONE,
+            },
+            .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+            .NumRenderTargets = 1,
+            .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
+            .SampleDesc = { .Count = NUM_MSAA_SAMPLES },
+        };
+
+        VHR(gr->device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&game_state->gpu_pipelines[0])));
+        VHR(gr->device->CreateRootSignature(0, vs.data(), vs.size(), IID_PPV_ARGS(&game_state->gpu_root_signatures[0])));
+    }
 }
 
 static void shutdown(GameState* game_state)
@@ -684,6 +732,11 @@ static void shutdown(GameState* game_state)
     assert(game_state);
 
     finish_gpu_commands(&game_state->gr);
+
+    for (i32 i = 0; i < ARRAYSIZE(game_state->gpu_pipelines); ++i) {
+        SAFE_RELEASE(game_state->gpu_pipelines[i]);
+        SAFE_RELEASE(game_state->gpu_root_signatures[i]);
+    }
 
     ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -716,6 +769,13 @@ static void update(GameState* game_state)
 static void draw(GameState* game_state)
 {
     assert(game_state);
+
+    GraphicsContext* gr = &game_state->gr;
+
+    gr->command_list->SetPipelineState(game_state->gpu_pipelines[0]);
+    gr->command_list->SetGraphicsRootSignature(game_state->gpu_root_signatures[0]);
+    gr->command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gr->command_list->DrawInstanced(3, 1, 0, 0);
 }
 
 i32 main()
