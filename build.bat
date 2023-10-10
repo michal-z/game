@@ -4,7 +4,7 @@ setlocal enableextensions enabledelayedexpansion
 set NAME=game
 set CONFIG=D
 
-set CPP_FLAGS=/std:c++20 /W4 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
+set CPP_FLAGS=/std:c++20 /W4 /wd4127 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
  /I"external/d3d12"^
@@ -24,7 +24,8 @@ if %CONFIG%==D set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 if %CONFIG%==R set LINK_FLAGS=%LINK_FLAGS%
 
 set DXC="d3d12/dxc.exe"
-set CSO_OUT_DIR="assets"
+set HLSL_OUT_DIR="assets"
+set HLSL_SM=6_6
 set HLSL_FLAGS=/WX /Ges /HV 2021 /nologo
 if %CONFIG%==D set HLSL_FLAGS=%HLSL_FLAGS% /Od /Zi /Qembed_debug
 if %CONFIG%==R set HLSL_FLAGS=%HLSL_FLAGS% /O3
@@ -209,11 +210,6 @@ IF NOT "%1"=="hlsl" (
   pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib
 ) & if ERRORLEVEL 1 GOTO error
 
-IF "%1"=="hlsl" (
- %DXC% %HLSL_FLAGS% /T vs_6_6 /E s00_vs /D_S00 shaders.hlsl /Fo %CSO_OUT_DIR%/s00_vs.cso
- %DXC% %HLSL_FLAGS% /T ps_6_6 /E s00_ps /D_S00 shaders.hlsl /Fo %CSO_OUT_DIR%/s00_ps.cso
-)
-
 GOTO end
 
 :error
@@ -225,3 +221,8 @@ IF EXIST *.obj DEL *.obj
 IF EXIST *.exp DEL *.exp
 
 IF "%1" == "run" IF EXIST %NAME%.exe %NAME%.exe
+
+IF "%1"=="hlsl" (
+ %DXC% %HLSL_FLAGS% /T vs_%HLSL_SM% /E s00_vs /D_S00 shaders.hlsl /Fo %HLSL_OUT_DIR%/s00_vs.cso
+ %DXC% %HLSL_FLAGS% /T ps_%HLSL_SM% /E s00_ps /D_S00 shaders.hlsl /Fo %HLSL_OUT_DIR%/s00_ps.cso
+)

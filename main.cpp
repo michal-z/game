@@ -83,7 +83,8 @@ static void present_gpu_frame(GraphicsContext* gr)
 
 static void finish_gpu_commands(GraphicsContext* gr)
 {
-    assert(gr && gr->device);
+    assert(gr);
+
     gr->frame_fence_counter += 1;
 
     VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
@@ -115,7 +116,7 @@ static void create_msaa_srgb_render_target(GraphicsContext* gr)
 
     gr->device->CreateRenderTargetView(gr->msaa_srgb_rt, nullptr, { .ptr = gr->rtv_heap_start.ptr + NUM_GPU_FRAMES * gr->rtv_heap_descriptor_size });
 
-    LOG("[graphics] MSAAx%d SRGB render target created", NUM_MSAA_SAMPLES);
+    LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", NUM_MSAA_SAMPLES, gr->window_width, gr->window_height);
 }
 
 static bool handle_window_resize(GraphicsContext* gr)
@@ -366,10 +367,9 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     return true;
 }
 
-static void deinit_graphics_context(GraphicsContext* gr)
+static void shutdown_graphics_context(GraphicsContext* gr)
 {
     assert(gr);
-    finish_gpu_commands(gr);
 
     SAFE_RELEASE(gr->msaa_srgb_rt);
     SAFE_RELEASE(gr->command_list);
@@ -446,7 +446,7 @@ static HWND create_window(i32 width, i32 height)
     if (!RegisterClassEx(&winclass))
         VHR(HRESULT_FROM_WIN32(GetLastError()));
 
-    LOG("[core] Window class registered");
+    LOG("[game] Window class registered");
 
     const DWORD style = WS_OVERLAPPEDWINDOW;
 
@@ -457,13 +457,68 @@ static HWND create_window(i32 width, i32 height)
     if (!window)
         VHR(HRESULT_FROM_WIN32(GetLastError()));
 
-    LOG("[core] Window created");
+    LOG("[game] Window created");
 
     return window;
 }
 
-static void draw_frame(GraphicsContext* gr)
+static f64 get_time()
 {
+    static LARGE_INTEGER start_counter;
+    static LARGE_INTEGER frequency;
+    if (start_counter.QuadPart == 0) {
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start_counter);
+    }
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
+}
+
+static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time)
+{
+    static f64 previous_time = -1.0;
+    static f64 header_refresh_time = 0.0;
+    static u32 num_frames = 0;
+
+    if (previous_time < 0.0) {
+        previous_time = get_time();
+        header_refresh_time = previous_time;
+    }
+
+    *out_time = get_time();
+    *out_delta_time = static_cast<f32>(*out_time - previous_time);
+    previous_time = *out_time;
+
+    if ((*out_time - header_refresh_time) >= 1.0) {
+        const f64 fps = num_frames / (*out_time - header_refresh_time);
+        const f64 ms = (1.0 / fps) * 1000.0;
+        char header[128];
+        snprintf(header, sizeof(header), "[%.1f fps  %.3f ms] %s", fps, ms, name);
+        SetWindowText(window, header);
+        header_refresh_time = *out_time;
+        num_frames = 0;
+    }
+    num_frames++;
+}
+
+struct GameState {
+    GraphicsContext gr;
+    ID3D12Resource2* vertex_buffer;
+    bool is_window_minimized;
+};
+
+static void draw(GameState* game_state);
+
+static void draw_with_msaa(GameState* game_state)
+{
+    assert(game_state);
+
+    if (game_state->is_window_minimized)
+        return;
+
+    GraphicsContext* gr = &game_state->gr;
+
     ID3D12CommandAllocator* command_allocator = gr->command_allocators[gr->frame_index];
     VHR(command_allocator->Reset());
     VHR(gr->command_list->Reset(command_allocator, nullptr));
@@ -501,7 +556,7 @@ static void draw_frame(GraphicsContext* gr)
         gr->command_list->ClearRenderTargetView(rt_descriptor, clear_color, 0, nullptr);
     }
 
-    // Draw more stuff here...
+    draw(game_state);
 
     {
         const D3D12_TEXTURE_BARRIER texture_barriers[] = {
@@ -514,8 +569,7 @@ static void draw_frame(GraphicsContext* gr)
                 .LayoutAfter = D3D12_BARRIER_LAYOUT_RESOLVE_SOURCE,
                 .pResource = gr->msaa_srgb_rt,
                 .Subresources = { .IndexOrFirstMipLevel = 0xffffffff },
-            },
-            {
+            }, {
                 .SyncBefore = D3D12_BARRIER_SYNC_NONE,
                 .SyncAfter = D3D12_BARRIER_SYNC_RESOLVE,
                 .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
@@ -528,7 +582,7 @@ static void draw_frame(GraphicsContext* gr)
         };
         const D3D12_BARRIER_GROUP barrier_group = {
             .Type = D3D12_BARRIER_TYPE_TEXTURE,
-            .NumBarriers = 2,
+            .NumBarriers = ARRAYSIZE(texture_barriers),
             .pTextureBarriers = texture_barriers,
         };
         gr->command_list->Barrier(1, &barrier_group);
@@ -575,8 +629,7 @@ static void draw_frame(GraphicsContext* gr)
                 .LayoutAfter = D3D12_BARRIER_LAYOUT_PRESENT,
                 .pResource = gr->swap_chain_buffers[gr->frame_index],
                 .Subresources = { .IndexOrFirstMipLevel = 0xffffffff },
-            },
-            {
+            }, {
                 .SyncBefore = D3D12_BARRIER_SYNC_RESOLVE,
                 .SyncAfter = D3D12_BARRIER_SYNC_NONE,
                 .AccessBefore = D3D12_BARRIER_ACCESS_RESOLVE_SOURCE,
@@ -589,7 +642,7 @@ static void draw_frame(GraphicsContext* gr)
         };
         const D3D12_BARRIER_GROUP barrier_group = {
             .Type = D3D12_BARRIER_TYPE_TEXTURE,
-            .NumBarriers = 2,
+            .NumBarriers = ARRAYSIZE(texture_barriers),
             .pTextureBarriers = texture_barriers,
         };
         gr->command_list->Barrier(1, &barrier_group);
@@ -602,77 +655,73 @@ static void draw_frame(GraphicsContext* gr)
     present_gpu_frame(gr);
 }
 
-static f64 get_time()
+static void init(GameState* game_state)
 {
-    static LARGE_INTEGER start_counter;
-    static LARGE_INTEGER frequency;
-    if (start_counter.QuadPart == 0) {
-        QueryPerformanceFrequency(&frequency);
-        QueryPerformanceCounter(&start_counter);
+    assert(game_state);
+
+    ImGui_ImplWin32_EnableDpiAwareness();
+    const f32 dpi_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(nullptr);
+    LOG("[game] Window DPI scale: %f", dpi_scale);
+
+    const HWND window = create_window(static_cast<i32>(1200 * dpi_scale), static_cast<i32>(800 * dpi_scale));
+
+    if (!init_graphics_context(window, &game_state->gr)) {
+        // TODO: Display message box in release mode.
+        VHR(E_FAIL);
     }
-    LARGE_INTEGER counter;
-    QueryPerformanceCounter(&counter);
-    return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
+
+    ImGui::CreateContext();
+    ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
+
+    if (!ImGui_ImplWin32_Init(window)) VHR(E_FAIL);
+    if (!ImGui_ImplDX12_Init(game_state->gr.device, NUM_GPU_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, game_state->gr.gpu_heap, game_state->gr.gpu_heap_start_cpu, game_state->gr.gpu_heap_start_gpu)) VHR(E_FAIL);
+
+    ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 }
 
-static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time)
+static void shutdown(GameState* game_state)
 {
-    static f64 previous_time = -1.0;
-    static f64 header_refresh_time = 0.0;
-    static u32 num_frames = 0;
+    assert(game_state);
 
-    if (previous_time < 0.0) {
-        previous_time = get_time();
-        header_refresh_time = previous_time;
-    }
+    finish_gpu_commands(&game_state->gr);
 
-    *out_time = get_time();
-    *out_delta_time = static_cast<f32>(*out_time - previous_time);
-    previous_time = *out_time;
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
 
-    if ((*out_time - header_refresh_time) >= 1.0) {
-        const f64 fps = num_frames / (*out_time - header_refresh_time);
-        const f64 ms = (1.0 / fps) * 1000.0;
-        char header[128];
-        snprintf(header, sizeof(header), "[%.1f fps  %.3f ms] %s", fps, ms, name);
-        SetWindowText(window, header);
-        header_refresh_time = *out_time;
-        num_frames = 0;
-    }
-    num_frames++;
+    shutdown_graphics_context(&game_state->gr);
+}
+
+static void update(GameState* game_state)
+{
+    assert(game_state);
+
+    game_state->is_window_minimized = !handle_window_resize(&game_state->gr);
+    if (game_state->is_window_minimized)
+        return;
+
+    f64 time;
+    f32 delta_time;
+    update_frame_stats(game_state->gr.window, WINDOW_NAME, &time, &delta_time);
+
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::ShowDemoWindow();
+
+    ImGui::Render();
+}
+
+static void draw(GameState* game_state)
+{
+    assert(game_state);
 }
 
 i32 main()
 {
-    ImGui_ImplWin32_EnableDpiAwareness();
-    const f32 dpi_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(nullptr);
-    LOG("[graphics] Window DPI scale: %f", dpi_scale);
-
-    const HWND window = create_window(static_cast<i32>(1200 * dpi_scale), static_cast<i32>(800 * dpi_scale));
-
-    GraphicsContext gr = {};
-    defer { deinit_graphics_context(&gr); };
-
-    if (!init_graphics_context(window, &gr)) {
-        // TODO: Display message box in release mode.
-        return 1;
-    }
-
-    ImGui::CreateContext();
-    defer { ImGui::DestroyContext(); };
-
-    ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
-
-    if (!ImGui_ImplWin32_Init(window)) return 1;
-    defer { ImGui_ImplWin32_Shutdown(); };
-
-    if (!ImGui_ImplDX12_Init(gr.device, NUM_GPU_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gr.gpu_heap, gr.gpu_heap_start_cpu, gr.gpu_heap_start_gpu)) return 1;
-    defer {
-        finish_gpu_commands(&gr);
-        ImGui_ImplDX12_Shutdown();
-    };
-
-    ImGui::GetStyle().ScaleAllSizes(dpi_scale);
+    GameState game_state = {};
+    init(&game_state);
 
     while (true) {
         MSG msg = {};
@@ -681,23 +730,12 @@ i32 main()
             DispatchMessage(&msg);
             if (msg.message == WM_QUIT) break;
         } else {
-            if (!handle_window_resize(&gr)) continue;
-
-            f64 time;
-            f32 delta_time;
-            update_frame_stats(gr.window, WINDOW_NAME, &time, &delta_time);
-
-            ImGui_ImplDX12_NewFrame();
-            ImGui_ImplWin32_NewFrame();
-            ImGui::NewFrame();
-
-            ImGui::ShowDemoWindow();
-
-            ImGui::Render();
-
-            draw_frame(&gr);
+            update(&game_state);
+            draw_with_msaa(&game_state);
         }
     }
+
+    shutdown(&game_state);
 
     return 0;
 }
