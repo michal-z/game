@@ -714,7 +714,7 @@ static void init(GameState* game_state)
             .PS = { ps.data(), ps.size() },
             .BlendState = {
                 .RenderTarget = {
-                    { .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }
+                    { .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL },
                 },
             },
             .SampleMask = 0xffffffff,
@@ -731,6 +731,39 @@ static void init(GameState* game_state)
         VHR(gr->device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&game_state->gpu_pipelines[0])));
         VHR(gr->device->CreateRootSignature(0, vs.data(), vs.size(), IID_PPV_ARGS(&game_state->gpu_root_signatures[0])));
     }
+
+    {
+        const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_UPLOAD };
+        const D3D12_RESOURCE_DESC1 desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = 1024, // TODO
+            .Height = 1,
+            .DepthOrArraySize = 1,
+            .MipLevels = 1,
+            .SampleDesc = { .Count = 1 },
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        };
+        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->vertex_buffer)));
+
+        const D3D12_RANGE range = { .Begin = 0, .End = 0 };
+        XMFLOAT2* ptr = nullptr;
+        VHR(game_state->vertex_buffer->Map(0, &range, reinterpret_cast<void**>(&ptr)));
+        *ptr++ = XMFLOAT2(-0.9f, -0.7f);
+        *ptr++ = XMFLOAT2(0.0f, 0.9f);
+        *ptr++ = XMFLOAT2(0.9f, -0.9f);
+        game_state->vertex_buffer->Unmap(0, nullptr);
+
+        const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+            .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+            .Buffer = {
+                .FirstElement = 0,
+                .NumElements = 3,
+                .StructureByteStride = sizeof(XMFLOAT2), // TODO: Vertex
+            },
+        };
+        gr->device->CreateShaderResourceView(game_state->vertex_buffer, &srv_desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 1 * gr->gpu_heap_descriptor_size});
+    }
 }
 
 static void shutdown(GameState* game_state)
@@ -739,6 +772,7 @@ static void shutdown(GameState* game_state)
 
     finish_gpu_commands(&game_state->gr);
 
+    SAFE_RELEASE(game_state->vertex_buffer);
     for (i32 i = 0; i < ARRAYSIZE(game_state->gpu_pipelines); ++i) {
         SAFE_RELEASE(game_state->gpu_pipelines[i]);
         SAFE_RELEASE(game_state->gpu_root_signatures[i]);
