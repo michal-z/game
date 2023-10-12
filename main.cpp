@@ -16,6 +16,10 @@ extern "C" {
 #define MAX_GPU_DESCRIPTORS (16 * 1024)
 #define NUM_MSAA_SAMPLES 8
 #define CLEAR_COLOR { 0.2f, 0.4f, 0.8f, 1.0 }
+#define GPU_BUFFER_SIZE_STATIC (8 * 1024 * 1024)
+#define GPU_BUFFER_SIZE_DYNAMIC (2 * 1024 * 1024)
+
+#define NUM_GPU_PIPELINES 1
 
 struct GraphicsContext {
     HWND window;
@@ -58,6 +62,19 @@ struct GraphicsContext {
     u32 frame_index;
 
     ID3D12Resource2* msaa_srgb_rt;
+};
+
+struct GameState {
+    GraphicsContext gr;
+    ID3D12Resource2* gpu_buffer_static;
+    ID3D12Resource2* gpu_buffer_dynamic;
+    ID3D12Resource2* upload_buffers[NUM_GPU_FRAMES];
+    void* upload_buffer_bases[NUM_GPU_FRAMES];
+
+    ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
+    ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
+    bool is_window_minimized;
+    ID2D1Factory7* d2d_factory;
 };
 
 static void present_gpu_frame(GraphicsContext* gr)
@@ -518,19 +535,32 @@ static std::vector<u8> load_file(const char* filename)
     fseek(file, 0, SEEK_SET);
     std::vector<u8> data(size_in_bytes);
     const usize num_read_bytes = fread(&data[0], 1, size_in_bytes, file);
+    (void)num_read_bytes;
     fclose(file);
     assert(size_in_bytes == num_read_bytes);
     return data;
 }
 
-#define NUM_GPU_PIPELINES 1
+struct TessellationSink : public ID2D1TessellationSink {
+    std::vector<f32> vertices;
 
-struct GameState {
-    GraphicsContext gr;
-    ID3D12Resource2* vertex_buffer;
-    ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
-    ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
-    bool is_window_minimized;
+    virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override
+    {
+        for (u32 i = 0; i < num_triangles; ++i) {
+            const D2D1_TRIANGLE* tri = &triangles[i];
+            vertices.push_back(tri->point1.x);
+            vertices.push_back(tri->point1.y);
+            vertices.push_back(tri->point2.x);
+            vertices.push_back(tri->point2.y);
+            vertices.push_back(tri->point3.x);
+            vertices.push_back(tri->point3.y);
+        }
+    }
+
+    virtual HRESULT QueryInterface(const IID&, void**) override { return S_OK; }
+    virtual ULONG AddRef() override { return 0; }
+    virtual ULONG Release() override { return 0; }
+    virtual HRESULT Close() override { return S_OK; }
 };
 
 static void draw(GameState* game_state);
@@ -706,6 +736,13 @@ static void init(GameState* game_state)
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
     {
+        const D2D1_FACTORY_OPTIONS options = {
+            .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION,
+        };
+        VHR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(game_state->d2d_factory), &options, reinterpret_cast<void**>(&game_state->d2d_factory)));
+    }
+
+    {
         const std::vector<u8> vs = load_file("assets/s00_vs.cso");
         const std::vector<u8> ps = load_file("assets/s00_ps.cso");
 
@@ -720,6 +757,7 @@ static void init(GameState* game_state)
             .SampleMask = 0xffffffff,
             .RasterizerState = {
                 .FillMode = D3D12_FILL_MODE_SOLID,
+                //.FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_NONE,
             },
             .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
@@ -732,37 +770,135 @@ static void init(GameState* game_state)
         VHR(gr->device->CreateRootSignature(0, vs.data(), vs.size(), IID_PPV_ARGS(&game_state->gpu_root_signatures[0])));
     }
 
-    {
+    // Upload buffers
+    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
         const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_UPLOAD };
         const D3D12_RESOURCE_DESC1 desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = 1024, // TODO
+            .Width = GPU_BUFFER_SIZE_DYNAMIC,
             .Height = 1,
             .DepthOrArraySize = 1,
             .MipLevels = 1,
             .SampleDesc = { .Count = 1 },
             .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         };
-        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->vertex_buffer)));
+        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->upload_buffers[i])));
 
         const D3D12_RANGE range = { .Begin = 0, .End = 0 };
-        XMFLOAT2* ptr = nullptr;
-        VHR(game_state->vertex_buffer->Map(0, &range, reinterpret_cast<void**>(&ptr)));
-        *ptr++ = XMFLOAT2(-0.9f, -0.7f);
-        *ptr++ = XMFLOAT2(0.0f, 0.9f);
-        *ptr++ = XMFLOAT2(0.9f, -0.9f);
-        game_state->vertex_buffer->Unmap(0, nullptr);
+        VHR(game_state->upload_buffers[i]->Map(0, &range, &game_state->upload_buffer_bases[i]));
+    }
 
-        const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+    // Static buffer
+    {
+        const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_DEFAULT };
+        const D3D12_RESOURCE_DESC1 desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = GPU_BUFFER_SIZE_STATIC,
+            .Height = 1,
+            .DepthOrArraySize = 1,
+            .MipLevels = 1,
+            .SampleDesc = { .Count = 1 },
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        };
+        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->gpu_buffer_static)));
+    }
+
+    // Dynamic buffer
+    {
+        const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_DEFAULT };
+        const D3D12_RESOURCE_DESC1 desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = GPU_BUFFER_SIZE_DYNAMIC,
+            .Height = 1,
+            .DepthOrArraySize = 1,
+            .MipLevels = 1,
+            .SampleDesc = { .Count = 1 },
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        };
+        VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->gpu_buffer_dynamic)));
+    }
+
+    // Create static geometry and store it in the upload buffer
+    {
+        const D2D1_ROUNDED_RECT shape = {
+            .rect = { 100.0f, 100.0f, 500.0f, 500.0f },
+            .radiusX = 50.0f,
+            .radiusY = 50.0f,
+        };
+        ID2D1RoundedRectangleGeometry* geo = nullptr;
+        VHR(game_state->d2d_factory->CreateRoundedRectangleGeometry(&shape, &geo));
+        defer { SAFE_RELEASE(geo); };
+
+        TessellationSink sink;
+        VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
+
+        auto* ptr = static_cast<f32*>(game_state->upload_buffer_bases[0]);
+        memcpy(ptr, sink.vertices.data(), sizeof(f32) * sink.vertices.size());
+    }
+
+    // Copy upload buffer to the static buffer
+    {
+        ID3D12CommandAllocator* command_allocator = gr->command_allocators[0];
+        VHR(command_allocator->Reset());
+        VHR(gr->command_list->Reset(command_allocator, nullptr));
+
+        {
+            const D3D12_BUFFER_BARRIER buffer_barriers[] = {
+                {
+                    .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+                    .SyncAfter = D3D12_BARRIER_SYNC_COPY,
+                    .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+                    .AccessAfter = D3D12_BARRIER_ACCESS_COPY_SOURCE,
+                    .pResource = game_state->upload_buffers[0],
+                    .Size = UINT64_MAX,
+                }, {
+                    .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+                    .SyncAfter = D3D12_BARRIER_SYNC_COPY,
+                    .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+                    .AccessAfter = D3D12_BARRIER_ACCESS_COPY_DEST,
+                    .pResource = game_state->gpu_buffer_static,
+                    .Size = UINT64_MAX,
+                },
+            };
+            const D3D12_BARRIER_GROUP barrier_group = {
+                .Type = D3D12_BARRIER_TYPE_BUFFER,
+                .NumBarriers = ARRAYSIZE(buffer_barriers),
+                .pBufferBarriers = buffer_barriers,
+            };
+            gr->command_list->Barrier(1, &barrier_group);
+        }
+
+        gr->command_list->CopyBufferRegion(game_state->gpu_buffer_static, 0, game_state->upload_buffers[0], 0, GPU_BUFFER_SIZE_DYNAMIC);
+
+        VHR(gr->command_list->Close());
+        gr->command_queue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList**>(&gr->command_list));
+
+        finish_gpu_commands(gr);
+    }
+
+    {
+        const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
             .Buffer = {
                 .FirstElement = 0,
-                .NumElements = 3,
+                .NumElements = 1024, // TODO
                 .StructureByteStride = sizeof(XMFLOAT2), // TODO: Vertex
             },
         };
-        gr->device->CreateShaderResourceView(game_state->vertex_buffer, &srv_desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 1 * gr->gpu_heap_descriptor_size});
+        gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 2 * gr->gpu_heap_descriptor_size});
+    }
+    {
+        const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
+            .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+            .Buffer = {
+                .FirstElement = 0,
+                .NumElements = 1,
+                .StructureByteStride = sizeof(XMFLOAT4X4),
+            },
+        };
+        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 1 * gr->gpu_heap_descriptor_size});
     }
 }
 
@@ -772,7 +908,12 @@ static void shutdown(GameState* game_state)
 
     finish_gpu_commands(&game_state->gr);
 
-    SAFE_RELEASE(game_state->vertex_buffer);
+    SAFE_RELEASE(game_state->d2d_factory);
+    SAFE_RELEASE(game_state->gpu_buffer_static);
+    SAFE_RELEASE(game_state->gpu_buffer_dynamic);
+    for (i32 i = 0; i < ARRAYSIZE(game_state->upload_buffers); ++i) {
+        SAFE_RELEASE(game_state->upload_buffers[i]);
+    }
     for (i32 i = 0; i < ARRAYSIZE(game_state->gpu_pipelines); ++i) {
         SAFE_RELEASE(game_state->gpu_pipelines[i]);
         SAFE_RELEASE(game_state->gpu_root_signatures[i]);
@@ -812,10 +953,70 @@ static void draw(GameState* game_state)
 
     GraphicsContext* gr = &game_state->gr;
 
+    {
+        const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(0.0f, static_cast<f32>(gr->window_width), static_cast<f32>(gr->window_height), 0.0f, -1.0f, 1.0f);
+        auto* ptr = static_cast<XMFLOAT4X4*>(game_state->upload_buffer_bases[gr->frame_index]);
+        XMStoreFloat4x4(ptr, XMMatrixTranspose(xform));
+    }
+
+    {
+        const D3D12_BUFFER_BARRIER buffer_barriers[] = {
+            {
+                .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+                .SyncAfter = D3D12_BARRIER_SYNC_COPY,
+                .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+                .AccessAfter = D3D12_BARRIER_ACCESS_COPY_SOURCE,
+                .pResource = game_state->upload_buffers[gr->frame_index],
+                .Size = UINT64_MAX,
+            }, {
+                .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+                .SyncAfter = D3D12_BARRIER_SYNC_COPY,
+                .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+                .AccessAfter = D3D12_BARRIER_ACCESS_COPY_DEST,
+                .pResource = game_state->gpu_buffer_dynamic,
+                .Size = UINT64_MAX,
+            },
+        };
+        const D3D12_BARRIER_GROUP barrier_group = {
+            .Type = D3D12_BARRIER_TYPE_BUFFER,
+            .NumBarriers = ARRAYSIZE(buffer_barriers),
+            .pBufferBarriers = buffer_barriers,
+        };
+        gr->command_list->Barrier(1, &barrier_group);
+    }
+
+    gr->command_list->CopyBufferRegion(game_state->gpu_buffer_dynamic, 0, game_state->upload_buffers[gr->frame_index], 0, sizeof(XMFLOAT4X4));
+
+    {
+        const D3D12_BUFFER_BARRIER buffer_barriers[] = {
+            {
+                .SyncBefore = D3D12_BARRIER_SYNC_NONE,
+                .SyncAfter = D3D12_BARRIER_SYNC_DRAW,
+                .AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS,
+                .AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                .pResource = game_state->gpu_buffer_static,
+                .Size = UINT64_MAX,
+            }, {
+                .SyncBefore = D3D12_BARRIER_SYNC_COPY,
+                .SyncAfter = D3D12_BARRIER_SYNC_DRAW,
+                .AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST,
+                .AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                .pResource = game_state->gpu_buffer_dynamic,
+                .Size = UINT64_MAX,
+            },
+        };
+        const D3D12_BARRIER_GROUP barrier_group = {
+            .Type = D3D12_BARRIER_TYPE_BUFFER,
+            .NumBarriers = ARRAYSIZE(buffer_barriers),
+            .pBufferBarriers = buffer_barriers,
+        };
+        gr->command_list->Barrier(1, &barrier_group);
+    }
+
     gr->command_list->SetPipelineState(game_state->gpu_pipelines[0]);
     gr->command_list->SetGraphicsRootSignature(game_state->gpu_root_signatures[0]);
     gr->command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    gr->command_list->DrawInstanced(3, 1, 0, 0);
+    gr->command_list->DrawInstanced(200, 1, 0, 0);
 }
 
 i32 main()

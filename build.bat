@@ -207,7 +207,7 @@ IF NOT EXIST pch.pch (
 
 IF NOT "%1"=="hlsl" (
  cl %CPP_FLAGS% /Yu"pch.h" main.cpp /link %LINK_FLAGS%^
-  pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib
+  pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib d2d1.lib
 ) & if ERRORLEVEL 1 GOTO error
 
 GOTO end
