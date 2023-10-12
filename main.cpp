@@ -843,7 +843,6 @@ static void init(GameState* game_state)
             const u32 num_vertices = static_cast<u32>(sink.vertices.size()) - first_vertex;
 
             game_state->meshes.push_back({ first_vertex, num_vertices });
-
         }
         {
             const D2D1_ELLIPSE shape = {
@@ -881,9 +880,8 @@ static void init(GameState* game_state)
 
     // Copy upload buffer to the static buffer
     {
-        ID3D12CommandAllocator* command_allocator = gr->command_allocators[0];
-        VHR(command_allocator->Reset());
-        VHR(gr->command_list->Reset(command_allocator, nullptr));
+        VHR(gr->command_allocators[0]->Reset());
+        VHR(gr->command_list->Reset(gr->command_allocators[0], nullptr));
 
         {
             const D3D12_BUFFER_BARRIER buffer_barriers[] = {
@@ -914,6 +912,7 @@ static void init(GameState* game_state)
         gr->command_list->CopyBufferRegion(game_state->gpu_buffer_static, 0, game_state->upload_buffers[0], 0, GPU_BUFFER_SIZE_DYNAMIC);
 
         VHR(gr->command_list->Close());
+
         gr->command_queue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList**>(&gr->command_list));
 
         finish_gpu_commands(gr);
