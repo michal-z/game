@@ -8,7 +8,13 @@ struct Vertex {
 
 #if defined(_S00)
 
-#define ROOT_SIGNATURE "RootFlags(CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED)"
+#define ROOT_SIGNATURE "RootFlags(CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED), " \
+    "RootConstants(b0, num32BitConstants = 1)"
+
+struct RootConst {
+    uint first_vertex;
+};
+ConstantBuffer<RootConst> root_const : register(b0);
 
 [RootSignature(ROOT_SIGNATURE)]
 void s00_vs(
@@ -18,7 +24,9 @@ void s00_vs(
     StructuredBuffer<Transform> xform = ResourceDescriptorHeap[1];
     StructuredBuffer<Vertex> vertex_buffer = ResourceDescriptorHeap[2];
 
-    out_position = mul(float4(vertex_buffer[vertex_id], 0.0, 1.0), xform[0].m);
+    const uint first_vertex = root_const.first_vertex;
+
+    out_position = mul(float4(vertex_buffer[vertex_id + first_vertex], 0.0, 1.0), xform[0].m);
 }
 
 [RootSignature(ROOT_SIGNATURE)]

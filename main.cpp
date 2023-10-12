@@ -64,6 +64,15 @@ struct GraphicsContext {
     ID3D12Resource2* msaa_srgb_rt;
 };
 
+struct Vertex {
+    f32 x, y;
+};
+
+struct StaticMesh {
+    u32 first_vertex;
+    u32 num_vertices;
+};
+
 struct GameState {
     GraphicsContext gr;
     ID3D12Resource2* gpu_buffer_static;
@@ -75,6 +84,8 @@ struct GameState {
     ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
     bool is_window_minimized;
     ID2D1Factory7* d2d_factory;
+
+    std::vector<StaticMesh> meshes;
 };
 
 static void present_gpu_frame(GraphicsContext* gr)
@@ -542,18 +553,15 @@ static std::vector<u8> load_file(const char* filename)
 }
 
 struct TessellationSink : public ID2D1TessellationSink {
-    std::vector<f32> vertices;
+    std::vector<Vertex> vertices;
 
     virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override
     {
         for (u32 i = 0; i < num_triangles; ++i) {
             const D2D1_TRIANGLE* tri = &triangles[i];
-            vertices.push_back(tri->point1.x);
-            vertices.push_back(tri->point1.y);
-            vertices.push_back(tri->point2.x);
-            vertices.push_back(tri->point2.y);
-            vertices.push_back(tri->point3.x);
-            vertices.push_back(tri->point3.y);
+            vertices.push_back({ .x = tri->point1.x, .y = tri->point1.y });
+            vertices.push_back({ .x = tri->point2.x, .y = tri->point2.y });
+            vertices.push_back({ .x = tri->point3.x, .y = tri->point3.y });
         }
     }
 
@@ -736,9 +744,7 @@ static void init(GameState* game_state)
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
     {
-        const D2D1_FACTORY_OPTIONS options = {
-            .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION,
-        };
+        const D2D1_FACTORY_OPTIONS options = { .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION };
         VHR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(game_state->d2d_factory), &options, reinterpret_cast<void**>(&game_state->d2d_factory)));
     }
 
@@ -818,22 +824,59 @@ static void init(GameState* game_state)
         VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->gpu_buffer_dynamic)));
     }
 
-    // Create static geometry and store it in the upload buffer
+    // Create static meshes and store them in the upload buffer
     {
-        const D2D1_ROUNDED_RECT shape = {
-            .rect = { 100.0f, 100.0f, 500.0f, 500.0f },
-            .radiusX = 50.0f,
-            .radiusY = 50.0f,
-        };
-        ID2D1RoundedRectangleGeometry* geo = nullptr;
-        VHR(game_state->d2d_factory->CreateRoundedRectangleGeometry(&shape, &geo));
-        defer { SAFE_RELEASE(geo); };
-
         TessellationSink sink;
-        VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
 
-        auto* ptr = static_cast<f32*>(game_state->upload_buffer_bases[0]);
-        memcpy(ptr, sink.vertices.data(), sizeof(f32) * sink.vertices.size());
+        {
+            const D2D1_ROUNDED_RECT shape = {
+                .rect = { 100.0f, 100.0f, 500.0f, 500.0f },
+                .radiusX = 50.0f,
+                .radiusY = 50.0f,
+            };
+            ID2D1RoundedRectangleGeometry* geo = nullptr;
+            VHR(game_state->d2d_factory->CreateRoundedRectangleGeometry(&shape, &geo));
+            defer { SAFE_RELEASE(geo); };
+
+            const u32 first_vertex = static_cast<u32>(sink.vertices.size());
+            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
+            const u32 num_vertices = static_cast<u32>(sink.vertices.size()) - first_vertex;
+
+            game_state->meshes.push_back({ first_vertex, num_vertices });
+
+        }
+        {
+            const D2D1_ELLIPSE shape = {
+                .point = { 700.0f, 700.0f },
+                .radiusX = 250.0f,
+                .radiusY = 250.0f,
+            };
+            ID2D1EllipseGeometry* geo = nullptr;
+            VHR(game_state->d2d_factory->CreateEllipseGeometry(&shape, &geo));
+            defer { SAFE_RELEASE(geo); };
+
+            const u32 first_vertex = static_cast<u32>(sink.vertices.size());
+            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
+            const u32 num_vertices = static_cast<u32>(sink.vertices.size()) - first_vertex;
+
+            game_state->meshes.push_back({ first_vertex, num_vertices });
+        }
+
+        auto* ptr = static_cast<Vertex*>(game_state->upload_buffer_bases[0]);
+        memcpy(ptr, sink.vertices.data(), sizeof(Vertex) * sink.vertices.size());
+
+        {
+            const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Buffer = {
+                    .FirstElement = 0,
+                    .NumElements = static_cast<u32>(sink.vertices.size()),
+                    .StructureByteStride = sizeof(Vertex),
+                },
+            };
+            gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 2 * gr->gpu_heap_descriptor_size});
+        }
     }
 
     // Copy upload buffer to the static buffer
@@ -876,18 +919,6 @@ static void init(GameState* game_state)
         finish_gpu_commands(gr);
     }
 
-    {
-        const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
-            .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-            .Buffer = {
-                .FirstElement = 0,
-                .NumElements = 1024, // TODO
-                .StructureByteStride = sizeof(XMFLOAT2), // TODO: Vertex
-            },
-        };
-        gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 2 * gr->gpu_heap_descriptor_size});
-    }
     {
         const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
@@ -1016,7 +1047,12 @@ static void draw(GameState* game_state)
     gr->command_list->SetPipelineState(game_state->gpu_pipelines[0]);
     gr->command_list->SetGraphicsRootSignature(game_state->gpu_root_signatures[0]);
     gr->command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    gr->command_list->DrawInstanced(200, 1, 0, 0);
+
+    gr->command_list->SetGraphicsRoot32BitConstant(0, game_state->meshes[1].first_vertex, 0);
+    gr->command_list->DrawInstanced(game_state->meshes[1].num_vertices, 1, 0, 0);
+
+    gr->command_list->SetGraphicsRoot32BitConstant(0, game_state->meshes[0].first_vertex, 0);
+    gr->command_list->DrawInstanced(game_state->meshes[0].num_vertices, 1, 0, 0);
 }
 
 i32 main()
