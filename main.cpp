@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "cpp_hlsl_common.h"
 
 extern "C" {
     __declspec(dllexport) extern const u32 D3D12SDKVersion = 610;
@@ -17,7 +18,7 @@ extern "C" {
 #define NUM_MSAA_SAMPLES 8
 #define CLEAR_COLOR { 0.2f, 0.4f, 0.8f, 1.0 }
 #define GPU_BUFFER_SIZE_STATIC (8 * 1024 * 1024)
-#define GPU_BUFFER_SIZE_DYNAMIC (2 * 1024 * 1024)
+#define GPU_BUFFER_SIZE_DYNAMIC (256 * 1024)
 
 #define NUM_GPU_PIPELINES 1
 
@@ -64,13 +65,13 @@ struct GraphicsContext {
     ID3D12Resource2* msaa_srgb_rt;
 };
 
-struct Vertex {
-    f32 x, y;
-};
-
 struct StaticMesh {
     u32 first_vertex;
     u32 num_vertices;
+};
+
+struct Object {
+    u32 mesh_index;
 };
 
 struct GameState {
@@ -78,7 +79,7 @@ struct GameState {
     ID3D12Resource2* gpu_buffer_static;
     ID3D12Resource2* gpu_buffer_dynamic;
     ID3D12Resource2* upload_buffers[NUM_GPU_FRAMES];
-    void* upload_buffer_bases[NUM_GPU_FRAMES];
+    u8* upload_buffer_bases[NUM_GPU_FRAMES];
 
     ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
     ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
@@ -86,6 +87,9 @@ struct GameState {
     ID2D1Factory7* d2d_factory;
 
     std::vector<StaticMesh> meshes;
+
+    std::vector<Object> objects;
+    std::vector<CppHlsl_Object> cpp_hlsl_objects;
 };
 
 static void present_gpu_frame(GraphicsContext* gr)
@@ -113,7 +117,6 @@ static void present_gpu_frame(GraphicsContext* gr)
 static void finish_gpu_commands(GraphicsContext* gr)
 {
     assert(gr && gr->device);
-
     gr->frame_fence_counter += 1;
 
     VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
@@ -553,7 +556,7 @@ static std::vector<u8> load_file(const char* filename)
 }
 
 struct TessellationSink : public ID2D1TessellationSink {
-    std::vector<Vertex> vertices;
+    std::vector<CppHlsl_Vertex> vertices;
 
     virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override
     {
@@ -791,7 +794,7 @@ static void init(GameState* game_state)
         VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr, IID_PPV_ARGS(&game_state->upload_buffers[i])));
 
         const D3D12_RANGE range = { .Begin = 0, .End = 0 };
-        VHR(game_state->upload_buffers[i]->Map(0, &range, &game_state->upload_buffer_bases[i]));
+        VHR(game_state->upload_buffers[i]->Map(0, &range, reinterpret_cast<void**>(&game_state->upload_buffer_bases[i])));
     }
 
     // Static buffer
@@ -830,7 +833,7 @@ static void init(GameState* game_state)
 
         {
             const D2D1_ROUNDED_RECT shape = {
-                .rect = { 100.0f, 100.0f, 500.0f, 500.0f },
+                .rect = { -100.0f, -100.0f, 100.0f, 100.0f },
                 .radiusX = 50.0f,
                 .radiusY = 50.0f,
             };
@@ -846,9 +849,9 @@ static void init(GameState* game_state)
         }
         {
             const D2D1_ELLIPSE shape = {
-                .point = { 700.0f, 700.0f },
-                .radiusX = 250.0f,
-                .radiusY = 250.0f,
+                .point = { 0.0f, 0.0f },
+                .radiusX = 150.0f,
+                .radiusY = 150.0f,
             };
             ID2D1EllipseGeometry* geo = nullptr;
             VHR(game_state->d2d_factory->CreateEllipseGeometry(&shape, &geo));
@@ -861,8 +864,8 @@ static void init(GameState* game_state)
             game_state->meshes.push_back({ first_vertex, num_vertices });
         }
 
-        auto* ptr = static_cast<Vertex*>(game_state->upload_buffer_bases[0]);
-        memcpy(ptr, sink.vertices.data(), sizeof(Vertex) * sink.vertices.size());
+        auto* ptr = reinterpret_cast<CppHlsl_Vertex*>(game_state->upload_buffer_bases[0]);
+        memcpy(ptr, sink.vertices.data(), sizeof(CppHlsl_Vertex) * sink.vertices.size());
 
         {
             const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
@@ -871,7 +874,7 @@ static void init(GameState* game_state)
                 .Buffer = {
                     .FirstElement = 0,
                     .NumElements = static_cast<u32>(sink.vertices.size()),
-                    .StructureByteStride = sizeof(Vertex),
+                    .StructureByteStride = sizeof(CppHlsl_Vertex),
                 },
             };
             gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 2 * gr->gpu_heap_descriptor_size});
@@ -918,6 +921,15 @@ static void init(GameState* game_state)
         finish_gpu_commands(gr);
     }
 
+    game_state->objects.push_back({ .mesh_index = 0 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 400.0f, .y = 400.0f });
+
+    game_state->objects.push_back({ .mesh_index = 0 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = 200.0f });
+
+    game_state->objects.push_back({ .mesh_index = 1 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 150.0f, .y = 0.0f });
+
     {
         const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
@@ -925,10 +937,22 @@ static void init(GameState* game_state)
             .Buffer = {
                 .FirstElement = 0,
                 .NumElements = 1,
-                .StructureByteStride = sizeof(XMFLOAT4X4),
+                .StructureByteStride = sizeof(CppHlsl_PerFrameState),
             },
         };
         gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 1 * gr->gpu_heap_descriptor_size});
+    }
+    {
+        const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
+            .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+            .Buffer = {
+                .FirstElement = sizeof(CppHlsl_PerFrameState) / sizeof(CppHlsl_Object),
+                .NumElements = static_cast<u32>(game_state->cpp_hlsl_objects.size()),
+                .StructureByteStride = sizeof(CppHlsl_Object),
+            },
+        };
+        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 3 * gr->gpu_heap_descriptor_size});
     }
 }
 
@@ -985,8 +1009,12 @@ static void draw(GameState* game_state)
 
     {
         const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(0.0f, static_cast<f32>(gr->window_width), static_cast<f32>(gr->window_height), 0.0f, -1.0f, 1.0f);
-        auto* ptr = static_cast<XMFLOAT4X4*>(game_state->upload_buffer_bases[gr->frame_index]);
-        XMStoreFloat4x4(ptr, XMMatrixTranspose(xform));
+        auto* ptr = reinterpret_cast<CppHlsl_PerFrameState*>(game_state->upload_buffer_bases[gr->frame_index]);
+        XMStoreFloat4x4(&ptr->proj, XMMatrixTranspose(xform));
+    }
+    {
+        auto* ptr = reinterpret_cast<CppHlsl_Object*>(game_state->upload_buffer_bases[gr->frame_index] + (sizeof(CppHlsl_PerFrameState) / sizeof(CppHlsl_Object)) * sizeof(CppHlsl_Object));
+        memcpy(ptr, game_state->cpp_hlsl_objects.data(), game_state->cpp_hlsl_objects.size() * sizeof(CppHlsl_Object));
     }
 
     {
@@ -1015,7 +1043,7 @@ static void draw(GameState* game_state)
         gr->command_list->Barrier(1, &barrier_group);
     }
 
-    gr->command_list->CopyBufferRegion(game_state->gpu_buffer_dynamic, 0, game_state->upload_buffers[gr->frame_index], 0, sizeof(XMFLOAT4X4));
+    gr->command_list->CopyBufferRegion(game_state->gpu_buffer_dynamic, 0, game_state->upload_buffers[gr->frame_index], 0, GPU_BUFFER_SIZE_DYNAMIC);
 
     {
         const D3D12_BUFFER_BARRIER buffer_barriers[] = {
@@ -1047,11 +1075,18 @@ static void draw(GameState* game_state)
     gr->command_list->SetGraphicsRootSignature(game_state->gpu_root_signatures[0]);
     gr->command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    gr->command_list->SetGraphicsRoot32BitConstant(0, game_state->meshes[1].first_vertex, 0);
-    gr->command_list->DrawInstanced(game_state->meshes[1].num_vertices, 1, 0, 0);
+    for (usize i = 0; i < game_state->objects.size(); ++i) {
+        const Object* obj = &game_state->objects[i];
+        const u32 mesh_index = obj->mesh_index;
 
-    gr->command_list->SetGraphicsRoot32BitConstant(0, game_state->meshes[0].first_vertex, 0);
-    gr->command_list->DrawInstanced(game_state->meshes[0].num_vertices, 1, 0, 0);
+        const u32 root_consts[2] = {
+            game_state->meshes[mesh_index].first_vertex,
+            static_cast<u32>(i),
+        };
+
+        gr->command_list->SetGraphicsRoot32BitConstants(0, ARRAYSIZE(root_consts), &root_consts, 0);
+        gr->command_list->DrawInstanced(game_state->meshes[mesh_index].num_vertices, 1, 0, 0);
+    }
 }
 
 i32 main()
