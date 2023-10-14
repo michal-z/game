@@ -567,8 +567,6 @@ static std::vector<u8> load_file(const char* filename)
     return data;
 }
 
-
-
 static void draw(GameState* game_state);
 
 static void draw_frame(GameState* game_state)
