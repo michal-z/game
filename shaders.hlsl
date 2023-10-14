@@ -16,14 +16,14 @@ void s00_vs(
     uint vertex_index : SV_VertexID,
     out float4 out_position : SV_Position)
 {
-    StructuredBuffer<CppHlsl_PerFrameState> frame_state_buffer = ResourceDescriptorHeap[1];
-    StructuredBuffer<CppHlsl_Vertex> vertex_buffer = ResourceDescriptorHeap[2];
-    StructuredBuffer<CppHlsl_Object> object_buffer = ResourceDescriptorHeap[3];
+    StructuredBuffer<CppHlsl_FrameState> frame_state_buffer = ResourceDescriptorHeap[RDH_FRAME_STATE];
+    StructuredBuffer<CppHlsl_Vertex> vertex_buffer = ResourceDescriptorHeap[RDH_VERTEX_BUFFER_STATIC];
+    StructuredBuffer<CppHlsl_Object> object_buffer = ResourceDescriptorHeap[RDH_OBJECTS_DYNAMIC];
 
     const uint first_vertex = root_const.first_vertex;
     const uint object_index = root_const.object_index;
 
-    const CppHlsl_PerFrameState frame_state = frame_state_buffer[0];
+    const CppHlsl_FrameState frame_state = frame_state_buffer[0];
     const CppHlsl_Vertex vertex = vertex_buffer[vertex_index + first_vertex];
     const CppHlsl_Object object = object_buffer[object_index];
 

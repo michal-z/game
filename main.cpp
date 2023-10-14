@@ -16,7 +16,8 @@ extern "C" {
 #define NUM_GPU_FRAMES 2
 #define MAX_GPU_DESCRIPTORS (16 * 1024)
 #define NUM_MSAA_SAMPLES 8
-#define CLEAR_COLOR { 0.2f, 0.4f, 0.8f, 1.0 }
+//#define CLEAR_COLOR { 0.2f, 0.4f, 0.8f, 1.0f }
+#define CLEAR_COLOR { 0.0f, 0.0f, 0.0f, 0.0f }
 #define GPU_BUFFER_SIZE_STATIC (8 * 1024 * 1024)
 #define GPU_BUFFER_SIZE_DYNAMIC (256 * 1024)
 
@@ -90,6 +91,13 @@ struct GameState {
 
     std::vector<Object> objects;
     std::vector<CppHlsl_Object> cpp_hlsl_objects;
+};
+
+#define MAX_DYNAMIC_OBJECTS 1024
+
+struct alignas(16) UploadData {
+    CppHlsl_FrameState frame_state;
+    CppHlsl_Object objects[MAX_DYNAMIC_OBJECTS];
 };
 
 static void present_gpu_frame(GraphicsContext* gr)
@@ -877,7 +885,7 @@ static void init(GameState* game_state)
                     .StructureByteStride = sizeof(CppHlsl_Vertex),
                 },
             };
-            gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 2 * gr->gpu_heap_descriptor_size});
+            gr->device->CreateShaderResourceView(game_state->gpu_buffer_static, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + RDH_VERTEX_BUFFER_STATIC * gr->gpu_heap_descriptor_size });
         }
     }
 
@@ -928,7 +936,7 @@ static void init(GameState* game_state)
     game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = 200.0f });
 
     game_state->objects.push_back({ .mesh_index = 1 });
-    game_state->cpp_hlsl_objects.push_back({ .x = 150.0f, .y = 0.0f });
+    game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
     {
         const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
@@ -937,22 +945,22 @@ static void init(GameState* game_state)
             .Buffer = {
                 .FirstElement = 0,
                 .NumElements = 1,
-                .StructureByteStride = sizeof(CppHlsl_PerFrameState),
+                .StructureByteStride = sizeof(CppHlsl_FrameState),
             },
         };
-        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 1 * gr->gpu_heap_descriptor_size});
+        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + RDH_FRAME_STATE * gr->gpu_heap_descriptor_size });
     }
     {
         const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
             .Buffer = {
-                .FirstElement = sizeof(CppHlsl_PerFrameState) / sizeof(CppHlsl_Object),
+                .FirstElement = sizeof(CppHlsl_FrameState) / sizeof(CppHlsl_Object),
                 .NumElements = static_cast<u32>(game_state->cpp_hlsl_objects.size()),
                 .StructureByteStride = sizeof(CppHlsl_Object),
             },
         };
-        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + 3 * gr->gpu_heap_descriptor_size});
+        gr->device->CreateShaderResourceView(game_state->gpu_buffer_dynamic, &desc, { .ptr = gr->gpu_heap_start_cpu.ptr + RDH_OBJECTS_DYNAMIC * gr->gpu_heap_descriptor_size });
     }
 }
 
@@ -1009,12 +1017,13 @@ static void draw(GameState* game_state)
 
     {
         const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(0.0f, static_cast<f32>(gr->window_width), static_cast<f32>(gr->window_height), 0.0f, -1.0f, 1.0f);
-        auto* ptr = reinterpret_cast<CppHlsl_PerFrameState*>(game_state->upload_buffer_bases[gr->frame_index]);
-        XMStoreFloat4x4(&ptr->proj, XMMatrixTranspose(xform));
-    }
-    {
-        auto* ptr = reinterpret_cast<CppHlsl_Object*>(game_state->upload_buffer_bases[gr->frame_index] + (sizeof(CppHlsl_PerFrameState) / sizeof(CppHlsl_Object)) * sizeof(CppHlsl_Object));
-        memcpy(ptr, game_state->cpp_hlsl_objects.data(), game_state->cpp_hlsl_objects.size() * sizeof(CppHlsl_Object));
+
+        auto* ptr = reinterpret_cast<UploadData*>(game_state->upload_buffer_bases[gr->frame_index]);
+        memset(ptr, 0, sizeof(UploadData));
+
+        XMStoreFloat4x4(&ptr->frame_state.proj, XMMatrixTranspose(xform));
+
+        memcpy(ptr->objects, game_state->cpp_hlsl_objects.data(), game_state->cpp_hlsl_objects.size() * sizeof(CppHlsl_Object));
     }
 
     {
@@ -1043,7 +1052,7 @@ static void draw(GameState* game_state)
         gr->command_list->Barrier(1, &barrier_group);
     }
 
-    gr->command_list->CopyBufferRegion(game_state->gpu_buffer_dynamic, 0, game_state->upload_buffers[gr->frame_index], 0, GPU_BUFFER_SIZE_DYNAMIC);
+    gr->command_list->CopyBufferRegion(game_state->gpu_buffer_dynamic, 0, game_state->upload_buffers[gr->frame_index], 0, sizeof(UploadData));
 
     {
         const D3D12_BUFFER_BARRIER buffer_barriers[] = {
@@ -1081,7 +1090,7 @@ static void draw(GameState* game_state)
 
         const u32 root_consts[2] = {
             game_state->meshes[mesh_index].first_vertex,
-            static_cast<u32>(i),
+            static_cast<u32>(i), // object index
         };
 
         gr->command_list->SetGraphicsRoot32BitConstants(0, ARRAYSIZE(root_consts), &root_consts, 0);
