@@ -6,20 +6,24 @@ extern "C" {
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
-#define ENBALE_D3D12_DEBUG_LAYER 1
-#define ENBALE_D3D12_GPU_BASED_VALIDATION 0
-#define ENBALE_D3D12_VSYNC 1
+#define GRC_WITH_DEBUG_LAYER 1
+#define GRC_WITH_GPU_BASED_VALIDATION 0
+#define GRC_ENABLE_VSYNC 1
+#define GRC_MAX_BUFFERED_FRAMES 2
+#define GRC_MAX_GPU_DESCRIPTORS (16 * 1024)
+#define GRC_NUM_MSAA_SAMPLES 8
+#define GRC_CLEAR_COLOR { 0.0f, 0.0f, 0.0f, 0.0f }
 
 #define WINDOW_NAME "game"
 #define WINDOW_MIN_WH 400
 
-#define NUM_GPU_FRAMES 2
-#define MAX_GPU_DESCRIPTORS (16 * 1024)
-#define NUM_MSAA_SAMPLES 8
-//#define CLEAR_COLOR { 0.2f, 0.4f, 0.8f, 1.0f }
-#define CLEAR_COLOR { 0.0f, 0.0f, 0.0f, 0.0f }
 #define GPU_BUFFER_SIZE_STATIC (8 * 1024 * 1024)
 #define GPU_BUFFER_SIZE_DYNAMIC (256 * 1024)
+
+#define MESH_ROUND_RECT_100x100 0
+#define MESH_CIRCLE_100 1
+#define MESH_RECT_100x100 2
+#define MESH_COUNT 3
 
 #define NUM_GPU_PIPELINES 1
 
@@ -33,10 +37,10 @@ struct GraphicsContext {
     ID3D12Device12* device;
 
     ID3D12CommandQueue* command_queue;
-    ID3D12CommandAllocator* command_allocators[NUM_GPU_FRAMES];
+    ID3D12CommandAllocator* command_allocators[GRC_MAX_BUFFERED_FRAMES];
     ID3D12GraphicsCommandList9* command_list;
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     ID3D12Debug6* debug;
     ID3D12DebugDevice2* debug_device;
     ID3D12DebugCommandQueue1* debug_command_queue;
@@ -47,7 +51,7 @@ struct GraphicsContext {
     IDXGISwapChain4* swap_chain;
     UINT swap_chain_flags;
     UINT swap_chain_present_interval;
-    ID3D12Resource* swap_chain_buffers[NUM_GPU_FRAMES];
+    ID3D12Resource* swap_chain_buffers[GRC_MAX_BUFFERED_FRAMES];
 
     ID3D12DescriptorHeap* rtv_heap;
     D3D12_CPU_DESCRIPTOR_HANDLE rtv_heap_start;
@@ -79,8 +83,8 @@ struct GameState {
     GraphicsContext gr;
     ID3D12Resource2* gpu_buffer_static;
     ID3D12Resource2* gpu_buffer_dynamic;
-    ID3D12Resource2* upload_buffers[NUM_GPU_FRAMES];
-    u8* upload_buffer_bases[NUM_GPU_FRAMES];
+    ID3D12Resource2* upload_buffers[GRC_MAX_BUFFERED_FRAMES];
+    u8* upload_buffer_bases[GRC_MAX_BUFFERED_FRAMES];
 
     ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
     ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
@@ -114,7 +118,7 @@ static void present_gpu_frame(GraphicsContext* gr)
     VHR(gr->command_queue->Signal(gr->frame_fence, gr->frame_fence_counter));
 
     const u64 gpu_frame_counter = gr->frame_fence->GetCompletedValue();
-    if ((gr->frame_fence_counter - gpu_frame_counter) >= NUM_GPU_FRAMES) {
+    if ((gr->frame_fence_counter - gpu_frame_counter) >= GRC_MAX_BUFFERED_FRAMES) {
         VHR(gr->frame_fence->SetEventOnCompletion(gpu_frame_counter + 1, gr->frame_fence_event));
         WaitForSingleObject(gr->frame_fence_event, INFINITE);
     }
@@ -145,18 +149,18 @@ static void create_msaa_srgb_render_target(GraphicsContext* gr)
         .DepthOrArraySize = 1,
         .MipLevels = 1,
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-        .SampleDesc = { .Count = NUM_MSAA_SAMPLES },
+        .SampleDesc = { .Count = GRC_NUM_MSAA_SAMPLES },
         .Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
     };
     const D3D12_CLEAR_VALUE clear_value = {
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-        .Color = CLEAR_COLOR,
+        .Color = GRC_CLEAR_COLOR,
     };
     VHR(gr->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_RENDER_TARGET, &clear_value, nullptr, 0, nullptr, IID_PPV_ARGS(&gr->msaa_srgb_rt)));
 
-    gr->device->CreateRenderTargetView(gr->msaa_srgb_rt, nullptr, { .ptr = gr->rtv_heap_start.ptr + NUM_GPU_FRAMES * gr->rtv_heap_descriptor_size });
+    gr->device->CreateRenderTargetView(gr->msaa_srgb_rt, nullptr, { .ptr = gr->rtv_heap_start.ptr + GRC_MAX_BUFFERED_FRAMES * gr->rtv_heap_descriptor_size });
 
-    LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", NUM_MSAA_SAMPLES, gr->window_width, gr->window_height);
+    LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", GRC_NUM_MSAA_SAMPLES, gr->window_width, gr->window_height);
 }
 
 static bool handle_window_resize(GraphicsContext* gr)
@@ -179,15 +183,15 @@ static bool handle_window_resize(GraphicsContext* gr)
 
         finish_gpu_commands(gr);
 
-        for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
+        for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
 
         VHR(gr->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, gr->swap_chain_flags));
 
-        for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+        for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
             VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
         }
 
-        for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+        for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
             gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
         }
 
@@ -216,7 +220,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     // Factory, adapater, device
     //
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     VHR(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&gr->dxgi_factory)));
 #else
     VHR(CreateDXGIFactory2(0, IID_PPV_ARGS(&gr->dxgi_factory)));
@@ -229,14 +233,14 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&gr->debug)))) {
-        LOG("[graphics] Failed to load D3D12 debug layer. Please rebuild with `ENBALE_D3D12_DEBUG_LAYER 0` and try again.");
+        LOG("[graphics] Failed to load D3D12 debug layer. Please rebuild with `GRC_WITH_DEBUG_LAYER 0` and try again.");
         return false;
     }
     gr->debug->EnableDebugLayer();
     LOG("[graphics] D3D12 Debug Layer enabled");
-#if ENBALE_D3D12_GPU_BASED_VALIDATION == 1
+#if GRC_WITH_GPU_BASED_VALIDATION
     gr->debug->SetEnableGPUBasedValidation(TRUE);
     LOG("[graphics] D3D12 GPU-Based Validation enabled");
 #endif
@@ -244,7 +248,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     if (FAILED(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)))) return false;
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_device)));
     VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_info_queue)));
     VHR(gr->debug_info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE));
@@ -294,13 +298,13 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     };
     VHR(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     VHR(gr->command_queue->QueryInterface(IID_PPV_ARGS(&gr->debug_command_queue)));
 #endif
 
     LOG("[graphics] Command queue created");
 
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
         VHR(gr->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gr->command_allocators[i])));
     }
 
@@ -308,7 +312,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     VHR(gr->device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&gr->command_list)));
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     VHR(gr->command_list->QueryInterface(IID_PPV_ARGS(&gr->debug_command_list)));
 #endif
 
@@ -319,7 +323,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     /* Swap chain flags */ {
         gr->swap_chain_flags = 0;
-        gr->swap_chain_present_interval = ENBALE_D3D12_VSYNC;
+        gr->swap_chain_present_interval = GRC_ENABLE_VSYNC;
 
         BOOL allow_tearing = FALSE;
         const HRESULT hr = gr->dxgi_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
@@ -336,7 +340,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
         .Stereo = FALSE,
         .SampleDesc = { .Count = 1 },
         .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-        .BufferCount = NUM_GPU_FRAMES,
+        .BufferCount = GRC_MAX_BUFFERED_FRAMES,
         .Scaling = DXGI_SCALING_NONE,
         .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
         .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,
@@ -350,7 +354,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     VHR(gr->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
         VHR(gr->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gr->swap_chain_buffers[i])));
     }
 
@@ -369,7 +373,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     gr->rtv_heap_start = gr->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     gr->rtv_heap_descriptor_size = gr->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
         gr->device->CreateRenderTargetView(gr->swap_chain_buffers[i], nullptr, { .ptr = gr->rtv_heap_start.ptr + i * gr->rtv_heap_descriptor_size });
     }
 
@@ -380,7 +384,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     const D3D12_DESCRIPTOR_HEAP_DESC gpu_heap_desc = {
         .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        .NumDescriptors = MAX_GPU_DESCRIPTORS,
+        .NumDescriptors = GRC_MAX_GPU_DESCRIPTORS,
         .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
         .NodeMask = 0,
     };
@@ -418,7 +422,7 @@ static void shutdown_graphics_context(GraphicsContext* gr)
 
     SAFE_RELEASE(gr->msaa_srgb_rt);
     SAFE_RELEASE(gr->command_list);
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) SAFE_RELEASE(gr->command_allocators[i]);
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gr->command_allocators[i]);
     if (gr->frame_fence_event) {
         CloseHandle(gr->frame_fence_event);
         gr->frame_fence_event = nullptr;
@@ -426,14 +430,14 @@ static void shutdown_graphics_context(GraphicsContext* gr)
     SAFE_RELEASE(gr->frame_fence);
     SAFE_RELEASE(gr->gpu_heap);
     SAFE_RELEASE(gr->rtv_heap);
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gr->swap_chain_buffers[i]);
     SAFE_RELEASE(gr->swap_chain);
     SAFE_RELEASE(gr->command_queue);
     SAFE_RELEASE(gr->device);
     SAFE_RELEASE(gr->adapter);
     SAFE_RELEASE(gr->dxgi_factory);
 
-#if ENBALE_D3D12_DEBUG_LAYER == 1
+#if GRC_WITH_DEBUG_LAYER
     SAFE_RELEASE(gr->debug_command_list);
     SAFE_RELEASE(gr->debug_command_queue);
     SAFE_RELEASE(gr->debug_info_queue);
@@ -563,24 +567,7 @@ static std::vector<u8> load_file(const char* filename)
     return data;
 }
 
-struct TessellationSink : public ID2D1TessellationSink {
-    std::vector<CppHlsl_Vertex> vertices;
 
-    virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override
-    {
-        for (u32 i = 0; i < num_triangles; ++i) {
-            const D2D1_TRIANGLE* tri = &triangles[i];
-            vertices.push_back({ .x = tri->point1.x, .y = tri->point1.y });
-            vertices.push_back({ .x = tri->point2.x, .y = tri->point2.y });
-            vertices.push_back({ .x = tri->point3.x, .y = tri->point3.y });
-        }
-    }
-
-    virtual HRESULT QueryInterface(const IID&, void**) override { return S_OK; }
-    virtual ULONG AddRef() override { return 0; }
-    virtual ULONG Release() override { return 0; }
-    virtual HRESULT Close() override { return S_OK; }
-};
 
 static void draw(GameState* game_state);
 
@@ -622,9 +609,9 @@ static void draw_frame(GameState* game_state)
 
     {
         const D3D12_CPU_DESCRIPTOR_HANDLE rt_descriptor = {
-            .ptr = gr->rtv_heap_start.ptr + NUM_GPU_FRAMES * gr->rtv_heap_descriptor_size
+            .ptr = gr->rtv_heap_start.ptr + GRC_MAX_BUFFERED_FRAMES * gr->rtv_heap_descriptor_size
         };
-        const f32 clear_color[] = CLEAR_COLOR;
+        const f32 clear_color[] = GRC_CLEAR_COLOR;
 
         gr->command_list->OMSetRenderTargets(1, &rt_descriptor, TRUE, nullptr);
         gr->command_list->ClearRenderTargetView(rt_descriptor, clear_color, 0, nullptr);
@@ -750,7 +737,7 @@ static void init(GameState* game_state)
     ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
 
     if (!ImGui_ImplWin32_Init(window)) VHR(E_FAIL);
-    if (!ImGui_ImplDX12_Init(gr->device, NUM_GPU_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gr->gpu_heap, gr->gpu_heap_start_cpu, gr->gpu_heap_start_gpu)) VHR(E_FAIL);
+    if (!ImGui_ImplDX12_Init(gr->device, GRC_MAX_BUFFERED_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gr->gpu_heap, gr->gpu_heap_start_cpu, gr->gpu_heap_start_gpu)) VHR(E_FAIL);
 
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
@@ -780,7 +767,7 @@ static void init(GameState* game_state)
             .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
             .NumRenderTargets = 1,
             .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
-            .SampleDesc = { .Count = NUM_MSAA_SAMPLES },
+            .SampleDesc = { .Count = GRC_NUM_MSAA_SAMPLES },
         };
 
         VHR(gr->device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&game_state->gpu_pipelines[0])));
@@ -788,7 +775,7 @@ static void init(GameState* game_state)
     }
 
     // Upload buffers
-    for (i32 i = 0; i < NUM_GPU_FRAMES; ++i) {
+    for (i32 i = 0; i < GRC_MAX_BUFFERED_FRAMES; ++i) {
         const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_UPLOAD };
         const D3D12_RESOURCE_DESC1 desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
@@ -837,43 +824,69 @@ static void init(GameState* game_state)
 
     // Create static meshes and store them in the upload buffer
     {
-        TessellationSink sink;
+        game_state->meshes.resize(MESH_COUNT);
+
+        struct TessellationSink : public ID2D1TessellationSink {
+            std::vector<CppHlsl_Vertex> vertices;
+
+            virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override {
+                for (u32 i = 0; i < num_triangles; ++i) {
+                    const D2D1_TRIANGLE* tri = &triangles[i];
+                    vertices.push_back({ .x = tri->point1.x, .y = tri->point1.y });
+                    vertices.push_back({ .x = tri->point2.x, .y = tri->point2.y });
+                    vertices.push_back({ .x = tri->point3.x, .y = tri->point3.y });
+                }
+            }
+
+            virtual HRESULT QueryInterface(const IID&, void**) override { return S_OK; }
+            virtual ULONG AddRef() override { return 0; }
+            virtual ULONG Release() override { return 0; }
+            virtual HRESULT Close() override { return S_OK; }
+        } tess_sink;
 
         {
             const D2D1_ROUNDED_RECT shape = {
-                .rect = { -100.0f, -100.0f, 100.0f, 100.0f },
-                .radiusX = 50.0f,
-                .radiusY = 50.0f,
+                .rect = { -50.0f, -50.0f, 50.0f, 50.0f }, .radiusX = 25.0f, .radiusY = 25.0f,
             };
             ID2D1RoundedRectangleGeometry* geo = nullptr;
             VHR(game_state->d2d_factory->CreateRoundedRectangleGeometry(&shape, &geo));
             defer { SAFE_RELEASE(geo); };
 
-            const u32 first_vertex = static_cast<u32>(sink.vertices.size());
-            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
-            const u32 num_vertices = static_cast<u32>(sink.vertices.size()) - first_vertex;
+            const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
+            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes.push_back({ first_vertex, num_vertices });
+            game_state->meshes[MESH_ROUND_RECT_100x100] = { first_vertex, num_vertices };
         }
         {
             const D2D1_ELLIPSE shape = {
-                .point = { 0.0f, 0.0f },
-                .radiusX = 150.0f,
-                .radiusY = 150.0f,
+                .point = { 0.0f, 0.0f }, .radiusX = 100.0f, .radiusY = 100.0f,
             };
             ID2D1EllipseGeometry* geo = nullptr;
             VHR(game_state->d2d_factory->CreateEllipseGeometry(&shape, &geo));
             defer { SAFE_RELEASE(geo); };
 
-            const u32 first_vertex = static_cast<u32>(sink.vertices.size());
-            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &sink));
-            const u32 num_vertices = static_cast<u32>(sink.vertices.size()) - first_vertex;
+            const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
+            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes.push_back({ first_vertex, num_vertices });
+            game_state->meshes[MESH_CIRCLE_100] = { first_vertex, num_vertices };
+        }
+        {
+            const D2D1_RECT_F shape = { -50.0f, -50.0f, 50.0f, 50.0f };
+            ID2D1RectangleGeometry* geo = nullptr;
+            VHR(game_state->d2d_factory->CreateRectangleGeometry(&shape, &geo));
+            defer { SAFE_RELEASE(geo); };
+
+            const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
+            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
+
+            game_state->meshes[MESH_RECT_100x100] = { first_vertex, num_vertices };
         }
 
         auto* ptr = reinterpret_cast<CppHlsl_Vertex*>(game_state->upload_buffer_bases[0]);
-        memcpy(ptr, sink.vertices.data(), sizeof(CppHlsl_Vertex) * sink.vertices.size());
+        memcpy(ptr, tess_sink.vertices.data(), sizeof(CppHlsl_Vertex) * tess_sink.vertices.size());
 
         {
             const D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
@@ -881,7 +894,7 @@ static void init(GameState* game_state)
                 .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                 .Buffer = {
                     .FirstElement = 0,
-                    .NumElements = static_cast<u32>(sink.vertices.size()),
+                    .NumElements = static_cast<u32>(tess_sink.vertices.size()),
                     .StructureByteStride = sizeof(CppHlsl_Vertex),
                 },
             };
@@ -929,13 +942,13 @@ static void init(GameState* game_state)
         finish_gpu_commands(gr);
     }
 
-    game_state->objects.push_back({ .mesh_index = 0 });
-    game_state->cpp_hlsl_objects.push_back({ .x = 400.0f, .y = 400.0f });
+    game_state->objects.push_back({ .mesh_index = MESH_ROUND_RECT_100x100 });
+    game_state->cpp_hlsl_objects.push_back({ .x = -400.0f, .y = 400.0f });
 
-    game_state->objects.push_back({ .mesh_index = 0 });
-    game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = 200.0f });
+    game_state->objects.push_back({ .mesh_index = MESH_RECT_100x100 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = -200.0f });
 
-    game_state->objects.push_back({ .mesh_index = 1 });
+    game_state->objects.push_back({ .mesh_index = MESH_CIRCLE_100 });
     game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
     {
@@ -1016,7 +1029,7 @@ static void draw(GameState* game_state)
     GraphicsContext* gr = &game_state->gr;
 
     {
-        const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(0.0f, static_cast<f32>(gr->window_width), static_cast<f32>(gr->window_height), 0.0f, -1.0f, 1.0f);
+        const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(-0.5f * gr->window_width, 0.5f * gr->window_width, -0.5f * gr->window_height, 0.5f * gr->window_height, -1.0f, 1.0f);
 
         auto* ptr = reinterpret_cast<UploadData*>(game_state->upload_buffer_bases[gr->frame_index]);
         memset(ptr, 0, sizeof(UploadData));
