@@ -23,7 +23,8 @@ extern "C" {
 #define MESH_ROUND_RECT_100x100 0
 #define MESH_CIRCLE_100 1
 #define MESH_RECT_100x100 2
-#define MESH_COUNT 3
+#define MESH_PATH_00 3
+#define MESH_COUNT 4
 
 #define NUM_GPU_PIPELINES 1
 
@@ -882,6 +883,38 @@ static void init(GameState* game_state)
 
             game_state->meshes[MESH_RECT_100x100] = { first_vertex, num_vertices };
         }
+        {
+            ID2D1PathGeometry* geo = nullptr;
+            VHR(game_state->d2d_factory->CreatePathGeometry(&geo));
+            defer { SAFE_RELEASE(geo); };
+
+            ID2D1GeometrySink* sink = nullptr;
+            VHR(geo->Open(&sink));
+            defer { SAFE_RELEASE(sink); };
+
+            sink->BeginFigure({ 0.0f, 200.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddLine({ 200.0f, 0.0f });
+            sink->AddLine({ 0.0f, -200.0f });
+            sink->AddLine({ -200.0f, 0.0f });
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            VHR(sink->Close());
+
+            ID2D1PathGeometry* geo1 = nullptr;
+            VHR(game_state->d2d_factory->CreatePathGeometry(&geo1));
+            defer { SAFE_RELEASE(geo1); };
+
+            ID2D1GeometrySink* sink1 = nullptr;
+            VHR(geo1->Open(&sink1));
+            defer { SAFE_RELEASE(sink1); };
+            VHR(geo->Widen(50.0f, nullptr, nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, sink1));
+            VHR(sink1->Close());
+
+            const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
+            VHR(geo1->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
+
+            game_state->meshes[MESH_PATH_00] = { first_vertex, num_vertices };
+        }
 
         auto* ptr = reinterpret_cast<CppHlsl_Vertex*>(game_state->upload_buffer_bases[0]);
         memcpy(ptr, tess_sink.vertices.data(), sizeof(CppHlsl_Vertex) * tess_sink.vertices.size());
@@ -947,6 +980,9 @@ static void init(GameState* game_state)
     game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = -200.0f });
 
     game_state->objects.push_back({ .mesh_index = MESH_CIRCLE_100 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
+
+    game_state->objects.push_back({ .mesh_index = MESH_PATH_00 });
     game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
     {
