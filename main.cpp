@@ -897,6 +897,12 @@ static void init(GameState* game_state)
             sink->AddLine({ 0.0f, -200.0f });
             sink->AddLine({ -200.0f, 0.0f });
             sink->EndFigure(D2D1_FIGURE_END_OPEN);
+
+            sink->BeginFigure({ -400.0f, 0.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddBezier({ { -400.0f, -400.0f }, { -100.0f, -300.0f }, { 0.0f, -400.0f } });
+            sink->AddBezier({ { 100.0f, -300.0f }, { 400.0f, -400.0f }, { 400.0f, 0.0f } });
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+
             VHR(sink->Close());
 
             ID2D1PathGeometry* geo1 = nullptr;
@@ -1063,7 +1069,15 @@ static void draw(GameState* game_state)
     GraphicsContext* gr = &game_state->gr;
 
     {
-        const XMMATRIX xform = XMMatrixOrthographicOffCenterLH(-0.5f * gr->window_width, 0.5f * gr->window_width, -0.5f * gr->window_height, 0.5f * gr->window_height, -1.0f, 1.0f);
+        const f32 r = 500.0f;
+        XMMATRIX xform;
+        if (gr->window_width >= gr->window_height) {
+            const float aspect = static_cast<f32>(gr->window_width) / gr->window_height;
+            xform = XMMatrixOrthographicOffCenterLH(-r * aspect, r * aspect, -r, r, -1.0f, 1.0f);
+        } else {
+            const float aspect = static_cast<f32>(gr->window_height) / gr->window_width;
+            xform = XMMatrixOrthographicOffCenterLH(-r, r, -r * aspect, r * aspect, -1.0f, 1.0f);
+        }
 
         auto* ptr = reinterpret_cast<UploadData*>(game_state->upload_buffer_bases[gr->frame_index]);
         memset(ptr, 0, sizeof(UploadData));
