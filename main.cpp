@@ -831,9 +831,9 @@ static void init(GameState* game_state)
             virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override {
                 for (u32 i = 0; i < num_triangles; ++i) {
                     const D2D1_TRIANGLE* tri = &triangles[i];
-                    vertices.push_back({ .x = tri->point1.x, .y = tri->point1.y });
-                    vertices.push_back({ .x = tri->point2.x, .y = tri->point2.y });
-                    vertices.push_back({ .x = tri->point3.x, .y = tri->point3.y });
+                    vertices.push_back({ tri->point1.x, tri->point1.y });
+                    vertices.push_back({ tri->point2.x, tri->point2.y });
+                    vertices.push_back({ tri->point3.x, tri->point3.y });
                 }
             }
 
