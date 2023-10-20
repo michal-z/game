@@ -7,6 +7,8 @@ set CONFIG=D
 set CPP_FLAGS=/std:c++20 /W4 /wd4127 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
+ /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
+ /D"JPH_DEBUG_RENDERER"^
  /I"external/d3d12"^
  /I"external/imgui"^
  /I"external/directxmath"^
@@ -39,7 +41,7 @@ set SRC_IMGUI=%SRC_IMGUI_ROOT%/imgui.cpp^
  %SRC_IMGUI_ROOT%/imgui_impl_win32.cpp^
  %SRC_IMGUI_ROOT%/imgui_impl_dx12.cpp
 
-set SRC_JOLT_ROOT=external/Jolt
+set SRC_JOLT_ROOT=external/jolt
 set SRC_JOLT=%SRC_JOLT_ROOT%/AABBTree/AABBTreeBuilder.cpp^
  %SRC_JOLT_ROOT%/Core/Color.cpp^
  %SRC_JOLT_ROOT%/Core/Factory.cpp^
@@ -194,9 +196,7 @@ IF NOT EXIST imgui.lib (
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT EXIST jolt.lib (
- cl %CPP_FLAGS% /c %SRC_JOLT%^
-  /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
-  /D"JPH_DEBUG_RENDERER"
+ cl %CPP_FLAGS% /c %SRC_JOLT%
  lib %LIB_FLAGS% *.obj /OUT:"jolt.lib"
  IF EXIST *.obj DEL *.obj
 ) & if ERRORLEVEL 1 GOTO error

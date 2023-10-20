@@ -27,14 +27,16 @@ void s00_vs(
     const CppHlsl_Vertex vertex = vertex_buffer[vertex_index + first_vertex];
     const CppHlsl_Object object = object_buffer[object_index];
 
-    const float4x4 t = float4x4(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
+    const float sin_r = sin(object.rotation_in_radians);
+    const float cos_r = cos(object.rotation_in_radians);
+    const float4x4 world = float4x4(
+        cos_r, sin_r, 0.0, 0.0,
+        -sin_r, cos_r, 0.0, 0.0,
         0.0, 0.0, 1.0, 0.0,
         object.x, object.y, 0.0, 1.0);
 
     const float4 v = float4(vertex.x, vertex.y, 0.0, 1.0);
-    out_position = mul(mul(v, t), frame_state.proj);
+    out_position = mul(mul(v, world), frame_state.proj);
 }
 
 [RootSignature(ROOT_SIGNATURE)]

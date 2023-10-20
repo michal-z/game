@@ -96,6 +96,11 @@ struct GameState {
 
     std::vector<Object> objects;
     std::vector<CppHlsl_Object> cpp_hlsl_objects;
+
+    struct {
+        JPH::TempAllocatorImpl* temp_allocator;
+        JPH::JobSystemThreadPool* job_system;
+    } phy;
 };
 
 #define MAX_DYNAMIC_OBJECTS 1024
@@ -715,6 +720,71 @@ static void draw_frame(GameState* game_state)
     present_gpu_frame(gr);
 }
 
+static void jolt_trace(const char* fmt, ...)
+{
+    va_list list;
+    va_start(list, fmt);
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), fmt, list);
+    va_end(list);
+
+    LOG("[physics] %s", buffer);
+}
+
+#ifdef JPH_ENABLE_ASSERTS
+static bool jolt_assert_failed(const char* expression, const char* message, const char* file, u32 line)
+{
+    LOG("[physics] Assert failed (%s): (%s:%d) %s", expression, file, line, message ? message : "");
+
+    // Breakpoint
+    return true;
+}
+#endif
+
+static constexpr auto OBJECT_LAYER_NON_MOVING = JPH::ObjectLayer(0);
+static constexpr auto OBJECT_LAYER_MOVING = JPH::ObjectLayer(1);
+static constexpr u32 OBJECT_LAYER_COUNT = 2;
+
+static constexpr auto BROAD_PHASE_LAYER_NON_MOVING = JPH::BroadPhaseLayer(0);
+static constexpr auto BROAD_PHASE_LAYER_MOVING = JPH::BroadPhaseLayer(1);
+static constexpr u32 BROAD_PHASE_LAYER_COUNT = 2;
+
+struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
+    virtual bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override {
+        switch (object1) {
+            case OBJECT_LAYER_NON_MOVING: return object2 == OBJECT_LAYER_MOVING;
+            case OBJECT_LAYER_MOVING: return true;
+            default: JPH_ASSERT(false); return false;
+        }
+    }
+};
+
+struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
+    JPH::BroadPhaseLayer object_to_broad_phase[OBJECT_LAYER_COUNT];
+
+    BroadPhaseLayerInterface() {
+        object_to_broad_phase[OBJECT_LAYER_NON_MOVING] = BROAD_PHASE_LAYER_NON_MOVING;
+        object_to_broad_phase[OBJECT_LAYER_MOVING] = BROAD_PHASE_LAYER_MOVING;
+    }
+
+    virtual u32 GetNumBroadPhaseLayers() const override { return BROAD_PHASE_LAYER_COUNT; }
+
+    virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
+        JPH_ASSERT(layer < OBJECT_LAYER_COUNT);
+        return object_to_broad_phase[layer];
+    }
+};
+
+struct ObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
+    virtual bool ShouldCollide(JPH::ObjectLayer layer1, JPH::BroadPhaseLayer layer2) const override {
+        switch (layer1) {
+            case OBJECT_LAYER_NON_MOVING: return layer2 == BROAD_PHASE_LAYER_MOVING;
+            case OBJECT_LAYER_MOVING: return true;
+            default: JPH_ASSERT(false); return false;
+        }
+    }
+};
+
 static void init(GameState* game_state)
 {
     assert(game_state);
@@ -744,6 +814,18 @@ static void init(GameState* game_state)
         const D2D1_FACTORY_OPTIONS options = { .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION };
         VHR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(game_state->d2d_factory), &options, reinterpret_cast<void**>(&game_state->d2d_factory)));
     }
+
+    JPH::RegisterDefaultAllocator();
+
+    JPH::Trace = jolt_trace;
+	JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = jolt_assert_failed;);
+
+    JPH::Factory::sInstance = new JPH::Factory();
+
+    JPH::RegisterTypes();
+
+    game_state->phy.temp_allocator = new JPH::TempAllocatorImpl(10 * 1024 * 1024);
+    game_state->phy.job_system = new JPH::JobSystemThreadPool(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers);
 
     {
         const std::vector<u8> vs = load_file("assets/s00_vs.cso");
@@ -1037,6 +1119,20 @@ static void shutdown(GameState* game_state)
     ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    if (game_state->phy.job_system) {
+        delete game_state->phy.job_system;
+        game_state->phy.job_system = nullptr;
+    }
+    if (game_state->phy.temp_allocator) {
+        delete game_state->phy.temp_allocator;
+        game_state->phy.temp_allocator = nullptr;
+    }
+
+    JPH::UnregisterTypes();
+
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
 
     shutdown_graphics_context(&game_state->gr);
 }
