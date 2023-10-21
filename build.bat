@@ -187,8 +187,6 @@ IF "%1"=="clean" (
  IF EXIST *.exe DEL *.exe
 )
 
-IF EXIST %NAME%.exe DEL %NAME%.exe
-
 IF NOT EXIST imgui.lib (
  cl %CPP_FLAGS% /c %SRC_IMGUI%
  lib %LIB_FLAGS% *.obj /OUT:"imgui.lib"
@@ -206,6 +204,7 @@ IF NOT EXIST pch.pch (
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT "%1"=="hlsl" (
+ IF EXIST %NAME%.exe DEL %NAME%.exe
  cl %CPP_FLAGS% /Yu"pch.h" main.cpp /link %LINK_FLAGS%^
   pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib d2d1.lib
 ) & if ERRORLEVEL 1 GOTO error
