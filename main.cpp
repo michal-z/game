@@ -2,12 +2,13 @@
 #include "cpp_hlsl_common.h"
 
 extern "C" {
-    __declspec(dllexport) extern const u32 D3D12SDKVersion = 610;
+    __declspec(dllexport) extern const u32 D3D12SDKVersion = 611;
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\d3d12\\";
 }
 
-#define GRC_WITH_DEBUG_LAYER 1
-#define GRC_WITH_GPU_BASED_VALIDATION 0
+#define WITH_D3D12_DEBUG_LAYER 1
+#define WITH_D3D12_GPU_BASED_VALIDATION 0
+
 #define GRC_ENABLE_VSYNC 1
 #define GRC_MAX_BUFFERED_FRAMES 2
 #define GRC_MAX_GPU_DESCRIPTORS (16 * 1024)
@@ -41,7 +42,7 @@ struct GraphicsContext {
     ID3D12CommandAllocator* command_allocators[GRC_MAX_BUFFERED_FRAMES];
     ID3D12GraphicsCommandList9* command_list;
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     ID3D12Debug6* debug;
     ID3D12DebugDevice2* debug_device;
     ID3D12DebugCommandQueue1* debug_command_queue;
@@ -82,6 +83,7 @@ struct Object {
 
 struct GameState {
     GraphicsContext gr;
+
     ID3D12Resource2* gpu_buffer_static;
     ID3D12Resource2* gpu_buffer_dynamic;
     ID3D12Resource2* upload_buffers[GRC_MAX_BUFFERED_FRAMES];
@@ -89,8 +91,9 @@ struct GameState {
 
     ID3D12PipelineState* gpu_pipelines[NUM_GPU_PIPELINES];
     ID3D12RootSignature* gpu_root_signatures[NUM_GPU_PIPELINES];
-    bool is_window_minimized;
     ID2D1Factory7* d2d_factory;
+
+    bool is_window_minimized;
 
     std::vector<StaticMesh> meshes;
 
@@ -226,7 +229,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     //
     // Factory, adapater, device
     //
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     VHR(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&gr->dxgi_factory)));
 #else
     VHR(CreateDXGIFactory2(0, IID_PPV_ARGS(&gr->dxgi_factory)));
@@ -239,14 +242,14 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     LOG("[graphics] Adapter: %S", adapter_desc.Description);
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&gr->debug)))) {
-        LOG("[graphics] Failed to load D3D12 debug layer. Please rebuild with `GRC_WITH_DEBUG_LAYER 0` and try again.");
+        LOG("[graphics] Failed to load D3D12 debug layer. Please rebuild with `WITH_D3D12_DEBUG_LAYER 0` and try again.");
         return false;
     }
     gr->debug->EnableDebugLayer();
     LOG("[graphics] D3D12 Debug Layer enabled");
-#if GRC_WITH_GPU_BASED_VALIDATION
+#if WITH_D3D12_GPU_BASED_VALIDATION
     gr->debug->SetEnableGPUBasedValidation(TRUE);
     LOG("[graphics] D3D12 GPU-Based Validation enabled");
 #endif
@@ -254,7 +257,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     if (FAILED(D3D12CreateDevice(gr->adapter, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&gr->device)))) return false;
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_device)));
     VHR(gr->device->QueryInterface(IID_PPV_ARGS(&gr->debug_info_queue)));
     VHR(gr->debug_info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE));
@@ -304,7 +307,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
     };
     VHR(gr->device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&gr->command_queue)));
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     VHR(gr->command_queue->QueryInterface(IID_PPV_ARGS(&gr->debug_command_queue)));
 #endif
 
@@ -318,7 +321,7 @@ static bool init_graphics_context(HWND window, GraphicsContext* gr)
 
     VHR(gr->device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&gr->command_list)));
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     VHR(gr->command_list->QueryInterface(IID_PPV_ARGS(&gr->debug_command_list)));
 #endif
 
@@ -443,7 +446,7 @@ static void shutdown_graphics_context(GraphicsContext* gr)
     SAFE_RELEASE(gr->adapter);
     SAFE_RELEASE(gr->dxgi_factory);
 
-#if GRC_WITH_DEBUG_LAYER
+#if WITH_D3D12_DEBUG_LAYER
     SAFE_RELEASE(gr->debug_command_list);
     SAFE_RELEASE(gr->debug_command_queue);
     SAFE_RELEASE(gr->debug_info_queue);
