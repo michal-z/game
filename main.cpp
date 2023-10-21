@@ -457,6 +457,7 @@ static void shutdown_graphics_context(GraphicsContext* gr)
 
         const auto refcount = gr->debug_device->Release();
         assert(refcount == 0);
+        (void)refcount;
 
         gr->debug_device = nullptr;
     }
