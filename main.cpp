@@ -8,38 +8,24 @@ extern "C" {
 
 #define WITH_D3D12_DEBUG_LAYER 1
 #define WITH_D3D12_GPU_BASED_VALIDATION 0
-
-#define GC_ENABLE_VSYNC 1
-#define GC_MAX_BUFFERED_FRAMES 2
-#define GC_MAX_GPU_DESCRIPTORS (16 * 1024)
-#define GC_NUM_MSAA_SAMPLES 8
-#define GC_CLEAR_COLOR { 0.0f, 0.0f, 0.0f, 0.0f }
-
-#define WINDOW_NAME "game"
-#define WINDOW_MIN_WH 400
-
-#define GPU_BUFFER_SIZE_STATIC (8 * 1024 * 1024)
-#define GPU_BUFFER_SIZE_DYNAMIC (256 * 1024)
-
-#define MESH_ROUND_RECT_100x100 0
-#define MESH_CIRCLE_100 1
-#define MESH_RECT_100x100 2
-#define MESH_PATH_00 3
-#define MESH_COUNT 4
-
-#define NUM_GPU_PIPELINES 1
-
+//--------------------------------------------------------------------------------------------------
 struct GpuContext {
+    static constexpr auto ENABLE_VSYNC = true;
+    static constexpr auto MAX_BUFFERED_FRAMES = 2;
+    static constexpr auto MAX_GPU_DESCRIPTORS = 16 * 1024;
+    static constexpr auto NUM_MSAA_SAMPLES = 8;
+    static constexpr auto CLEAR_COLOR = XMVECTORF32{ 0.0f, 0.0f, 0.0f, 0.0f };
+
     HWND window;
     i32 window_width;
     i32 window_height;
 
     IDXGIFactory7* dxgi_factory;
     IDXGIAdapter4* adapter;
-    ID3D12Device12* device;
+    ID3D12Device13* device;
 
     ID3D12CommandQueue* command_queue;
-    ID3D12CommandAllocator* command_allocators[GC_MAX_BUFFERED_FRAMES];
+    ID3D12CommandAllocator* command_allocators[MAX_BUFFERED_FRAMES];
     ID3D12GraphicsCommandList9* command_list;
 
 #if WITH_D3D12_DEBUG_LAYER
@@ -53,7 +39,7 @@ struct GpuContext {
     IDXGISwapChain4* swap_chain;
     UINT swap_chain_flags;
     UINT swap_chain_present_interval;
-    ID3D12Resource* swap_chain_buffers[GC_MAX_BUFFERED_FRAMES];
+    ID3D12Resource* swap_chain_buffers[MAX_BUFFERED_FRAMES];
 
     ID3D12DescriptorHeap* rtv_heap;
     D3D12_CPU_DESCRIPTOR_HANDLE rtv_heap_start;
@@ -71,24 +57,38 @@ struct GpuContext {
 
     ID3D12Resource2* msaa_srgb_rt;
 };
-
+//--------------------------------------------------------------------------------------------------
 struct StaticMesh {
+    static constexpr auto ROUND_RECT_100x100 = 0;
+    static constexpr auto CIRCLE_100 = 1;
+    static constexpr auto RECT_100x100 = 2;
+    static constexpr auto PATH_00 = 3;
+    static constexpr auto NUM = 4;
+
     u32 first_vertex;
     u32 num_vertices;
 };
-
+//--------------------------------------------------------------------------------------------------
 struct Object {
     u32 mesh_index;
 };
-
+//--------------------------------------------------------------------------------------------------
 struct GameState {
+    static constexpr auto WINDOW_NAME = "game";
+    static constexpr auto WINDOW_WIDTH = 1200;
+    static constexpr auto WINDOW_HEIGHT = 800;
+    static constexpr auto WINDOW_MIN_WH = 400;
+    static constexpr auto NUM_GPU_PIPELINES = 1;
+    static constexpr auto GPU_BUFFER_SIZE_STATIC = 8 * 1024 * 1024;
+    static constexpr auto GPU_BUFFER_SIZE_DYNAMIC = 256 * 1024;
+
     struct {
         GpuContext* gc;
         ID2D1Factory7* d2d_factory;
         ID3D12Resource2* buffer_static;
         ID3D12Resource2* buffer_dynamic;
-        ID3D12Resource2* upload_buffers[GC_MAX_BUFFERED_FRAMES];
-        u8* upload_buffer_bases[GC_MAX_BUFFERED_FRAMES];
+        ID3D12Resource2* upload_buffers[GpuContext::MAX_BUFFERED_FRAMES];
+        u8* upload_buffer_bases[GpuContext::MAX_BUFFERED_FRAMES];
         ID3D12PipelineState* pipelines[NUM_GPU_PIPELINES];
         ID3D12RootSignature* root_signatures[NUM_GPU_PIPELINES];
     } gpu;
@@ -105,14 +105,62 @@ struct GameState {
         JPH::JobSystemThreadPool* job_system;
     } phy;
 };
-
-#define MAX_DYNAMIC_OBJECTS 1024
-
+//--------------------------------------------------------------------------------------------------
 struct alignas(16) UploadData {
+    static constexpr auto MAX_DYNAMIC_OBJECTS = 1024;
+
     CppHlsl_FrameState frame_state;
     CppHlsl_Object objects[MAX_DYNAMIC_OBJECTS];
 };
+//--------------------------------------------------------------------------------------------------
+struct ObjectLayers {
+    static constexpr auto NON_MOVING = JPH::ObjectLayer(0);
+    static constexpr auto MOVING = JPH::ObjectLayer(1);
+    static constexpr auto NUM = 2;
+};
+//--------------------------------------------------------------------------------------------------
+struct BroadPhaseLayers {
+    static constexpr auto NON_MOVING = JPH::BroadPhaseLayer(0);
+    static constexpr auto MOVING = JPH::BroadPhaseLayer(1);
+    static constexpr auto NUM = 2;
+};
+//--------------------------------------------------------------------------------------------------
+struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
+    virtual bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override {
+        switch (object1) {
+            case ObjectLayers::NON_MOVING: return object2 == ObjectLayers::MOVING;
+            case ObjectLayers::MOVING: return true;
+            default: JPH_ASSERT(false); return false;
+        }
+    }
+};
+//--------------------------------------------------------------------------------------------------
+struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
+    JPH::BroadPhaseLayer object_to_broad_phase[ObjectLayers::NUM];
 
+    BroadPhaseLayerInterface() {
+        object_to_broad_phase[ObjectLayers::NON_MOVING] = BroadPhaseLayers::NON_MOVING;
+        object_to_broad_phase[ObjectLayers::MOVING] = BroadPhaseLayers::MOVING;
+    }
+
+    virtual u32 GetNumBroadPhaseLayers() const override { return BroadPhaseLayers::NUM; }
+
+    virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
+        JPH_ASSERT(layer < ObjectLayers::NUM);
+        return object_to_broad_phase[layer];
+    }
+};
+//--------------------------------------------------------------------------------------------------
+struct ObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
+    virtual bool ShouldCollide(JPH::ObjectLayer layer1, JPH::BroadPhaseLayer layer2) const override {
+        switch (layer1) {
+            case ObjectLayers::NON_MOVING: return layer2 == BroadPhaseLayers::MOVING;
+            case ObjectLayers::MOVING: return true;
+            default: JPH_ASSERT(false); return false;
+        }
+    }
+};
+//--------------------------------------------------------------------------------------------------
 static void present_gpu_frame(GpuContext* gc)
 {
     assert(gc && gc->device);
@@ -127,14 +175,14 @@ static void present_gpu_frame(GpuContext* gc)
     VHR(gc->command_queue->Signal(gc->frame_fence, gc->frame_fence_counter));
 
     const u64 gpu_frame_counter = gc->frame_fence->GetCompletedValue();
-    if ((gc->frame_fence_counter - gpu_frame_counter) >= GC_MAX_BUFFERED_FRAMES) {
+    if ((gc->frame_fence_counter - gpu_frame_counter) >= GpuContext::MAX_BUFFERED_FRAMES) {
         VHR(gc->frame_fence->SetEventOnCompletion(gpu_frame_counter + 1, gc->frame_fence_event));
         WaitForSingleObject(gc->frame_fence_event, INFINITE);
     }
 
     gc->frame_index = gc->swap_chain->GetCurrentBackBufferIndex();
 }
-
+//--------------------------------------------------------------------------------------------------
 static void finish_gpu_commands(GpuContext* gc)
 {
     assert(gc && gc->device);
@@ -145,7 +193,7 @@ static void finish_gpu_commands(GpuContext* gc)
 
     WaitForSingleObject(gc->frame_fence_event, INFINITE);
 }
-
+//--------------------------------------------------------------------------------------------------
 static void create_msaa_srgb_render_target(GpuContext* gc)
 {
     assert(gc && gc->device);
@@ -158,20 +206,20 @@ static void create_msaa_srgb_render_target(GpuContext* gc)
         .DepthOrArraySize = 1,
         .MipLevels = 1,
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-        .SampleDesc = { .Count = GC_NUM_MSAA_SAMPLES },
+        .SampleDesc = { .Count = GpuContext::NUM_MSAA_SAMPLES },
         .Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
     };
     const D3D12_CLEAR_VALUE clear_value = {
         .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-        .Color = GC_CLEAR_COLOR,
+        .Color = { GpuContext::CLEAR_COLOR[0], GpuContext::CLEAR_COLOR[1], GpuContext::CLEAR_COLOR[2], GpuContext::CLEAR_COLOR[3] },
     };
     VHR(gc->device->CreateCommittedResource3(&heap_desc, D3D12_HEAP_FLAG_NONE, &desc, D3D12_BARRIER_LAYOUT_RENDER_TARGET, &clear_value, nullptr, 0, nullptr, IID_PPV_ARGS(&gc->msaa_srgb_rt)));
 
-    gc->device->CreateRenderTargetView(gc->msaa_srgb_rt, nullptr, { .ptr = gc->rtv_heap_start.ptr + GC_MAX_BUFFERED_FRAMES * gc->rtv_heap_descriptor_size });
+    gc->device->CreateRenderTargetView(gc->msaa_srgb_rt, nullptr, { .ptr = gc->rtv_heap_start.ptr + GpuContext::MAX_BUFFERED_FRAMES * gc->rtv_heap_descriptor_size });
 
-    LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", GC_NUM_MSAA_SAMPLES, gc->window_width, gc->window_height);
+    LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", GpuContext::NUM_MSAA_SAMPLES, gc->window_width, gc->window_height);
 }
-
+//--------------------------------------------------------------------------------------------------
 static bool handle_window_resize(GpuContext* gc)
 {
     assert(gc && gc->device);
@@ -186,21 +234,19 @@ static bool handle_window_resize(GpuContext* gc)
     }
 
     if (current_rect.right != gc->window_width || current_rect.bottom != gc->window_height) {
-        assert(current_rect.right >= WINDOW_MIN_WH / 2);
-        assert(current_rect.bottom >= WINDOW_MIN_WH / 2);
         LOG("[graphics] Window resized to %dx%d", current_rect.right, current_rect.bottom);
 
         finish_gpu_commands(gc);
 
-        for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->swap_chain_buffers[i]);
+        for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->swap_chain_buffers[i]);
 
         VHR(gc->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, gc->swap_chain_flags));
 
-        for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+        for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
             VHR(gc->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gc->swap_chain_buffers[i])));
         }
 
-        for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+        for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
             gc->device->CreateRenderTargetView(gc->swap_chain_buffers[i], nullptr, { .ptr = gc->rtv_heap_start.ptr + i * gc->rtv_heap_descriptor_size });
         }
 
@@ -214,7 +260,7 @@ static bool handle_window_resize(GpuContext* gc)
 
     return true; // Render normally.
 }
-
+//--------------------------------------------------------------------------------------------------
 static bool init_gpu_context(HWND window, GpuContext* gc)
 {
     assert(gc && gc->device == nullptr);
@@ -313,7 +359,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
 
     LOG("[graphics] Command queue created");
 
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
         VHR(gc->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gc->command_allocators[i])));
     }
 
@@ -332,7 +378,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
     //
     /* Swap chain flags */ {
         gc->swap_chain_flags = 0;
-        gc->swap_chain_present_interval = GC_ENABLE_VSYNC;
+        gc->swap_chain_present_interval = GpuContext::ENABLE_VSYNC;
 
         BOOL allow_tearing = FALSE;
         const HRESULT hr = gc->dxgi_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
@@ -349,7 +395,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
         .Stereo = FALSE,
         .SampleDesc = { .Count = 1 },
         .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-        .BufferCount = GC_MAX_BUFFERED_FRAMES,
+        .BufferCount = GpuContext::MAX_BUFFERED_FRAMES,
         .Scaling = DXGI_SCALING_NONE,
         .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
         .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,
@@ -363,7 +409,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
 
     VHR(gc->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
         VHR(gc->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gc->swap_chain_buffers[i])));
     }
 
@@ -382,7 +428,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
     gc->rtv_heap_start = gc->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     gc->rtv_heap_descriptor_size = gc->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
         gc->device->CreateRenderTargetView(gc->swap_chain_buffers[i], nullptr, { .ptr = gc->rtv_heap_start.ptr + i * gc->rtv_heap_descriptor_size });
     }
 
@@ -393,7 +439,7 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
     //
     const D3D12_DESCRIPTOR_HEAP_DESC gpu_heap_desc = {
         .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        .NumDescriptors = GC_MAX_GPU_DESCRIPTORS,
+        .NumDescriptors = GpuContext::MAX_GPU_DESCRIPTORS,
         .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
         .NodeMask = 0,
     };
@@ -424,14 +470,14 @@ static bool init_gpu_context(HWND window, GpuContext* gc)
 
     return true;
 }
-
+//--------------------------------------------------------------------------------------------------
 static void shutdown_gpu_context(GpuContext* gc)
 {
     assert(gc);
 
     SAFE_RELEASE(gc->msaa_srgb_rt);
     SAFE_RELEASE(gc->command_list);
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->command_allocators[i]);
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->command_allocators[i]);
     if (gc->frame_fence_event) {
         CloseHandle(gc->frame_fence_event);
         gc->frame_fence_event = nullptr;
@@ -439,7 +485,7 @@ static void shutdown_gpu_context(GpuContext* gc)
     SAFE_RELEASE(gc->frame_fence);
     SAFE_RELEASE(gc->gpu_heap);
     SAFE_RELEASE(gc->rtv_heap);
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->swap_chain_buffers[i]);
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) SAFE_RELEASE(gc->swap_chain_buffers[i]);
     SAFE_RELEASE(gc->swap_chain);
     SAFE_RELEASE(gc->command_queue);
     SAFE_RELEASE(gc->device);
@@ -463,7 +509,7 @@ static void shutdown_gpu_context(GpuContext* gc)
     }
 #endif
 }
-
+//--------------------------------------------------------------------------------------------------
 static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -485,22 +531,22 @@ static LRESULT CALLBACK process_window_message(HWND window, UINT message, WPARAM
         } break;
         case WM_GETMINMAXINFO: {
             auto info = reinterpret_cast<MINMAXINFO*>(lparam);
-            info->ptMinTrackSize.x = WINDOW_MIN_WH;
-            info->ptMinTrackSize.y = WINDOW_MIN_WH;
+            info->ptMinTrackSize.x = GameState::WINDOW_MIN_WH;
+            info->ptMinTrackSize.y = GameState::WINDOW_MIN_WH;
             return 0;
         } break;
     }
     return DefWindowProc(window, message, wparam, lparam);
 }
-
-static HWND create_window(i32 width, i32 height)
+//--------------------------------------------------------------------------------------------------
+static HWND create_window(const char* name, i32 width, i32 height)
 {
     const WNDCLASSEXA winclass = {
         .cbSize = sizeof(winclass),
         .lpfnWndProc = process_window_message,
         .hInstance = GetModuleHandle(nullptr),
         .hCursor = LoadCursor(nullptr, IDC_ARROW),
-        .lpszClassName = WINDOW_NAME,
+        .lpszClassName = name,
     };
     if (!RegisterClassEx(&winclass))
         VHR(HRESULT_FROM_WIN32(GetLastError()));
@@ -512,7 +558,7 @@ static HWND create_window(i32 width, i32 height)
     RECT rect = { 0, 0, width, height };
     AdjustWindowRectEx(&rect, style, FALSE, 0);
 
-    const HWND window = CreateWindowEx(0, WINDOW_NAME, WINDOW_NAME, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
+    const HWND window = CreateWindowEx(0, name, name, style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, winclass.hInstance, nullptr);
     if (!window)
         VHR(HRESULT_FROM_WIN32(GetLastError()));
 
@@ -520,7 +566,7 @@ static HWND create_window(i32 width, i32 height)
 
     return window;
 }
-
+//--------------------------------------------------------------------------------------------------
 static f64 get_time()
 {
     static LARGE_INTEGER start_counter;
@@ -533,7 +579,7 @@ static f64 get_time()
     QueryPerformanceCounter(&counter);
     return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
 }
-
+//--------------------------------------------------------------------------------------------------
 static void update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time)
 {
     static f64 previous_time = -1.0;
@@ -560,7 +606,7 @@ static void update_frame_stats(HWND window, const char* name, f64* out_time, f32
     }
     num_frames++;
 }
-
+//--------------------------------------------------------------------------------------------------
 static std::vector<u8> load_file(const char* filename)
 {
     FILE* file = fopen(filename, "rb");
@@ -576,7 +622,7 @@ static std::vector<u8> load_file(const char* filename)
     assert(size_in_bytes == num_read_bytes);
     return data;
 }
-
+//--------------------------------------------------------------------------------------------------
 static void draw(GameState* game_state);
 
 static void draw_frame(GameState* game_state)
@@ -617,12 +663,11 @@ static void draw_frame(GameState* game_state)
 
     {
         const D3D12_CPU_DESCRIPTOR_HANDLE rt_descriptor = {
-            .ptr = gc->rtv_heap_start.ptr + GC_MAX_BUFFERED_FRAMES * gc->rtv_heap_descriptor_size
+            .ptr = gc->rtv_heap_start.ptr + GpuContext::MAX_BUFFERED_FRAMES * gc->rtv_heap_descriptor_size
         };
-        const f32 clear_color[] = GC_CLEAR_COLOR;
 
         gc->command_list->OMSetRenderTargets(1, &rt_descriptor, TRUE, nullptr);
-        gc->command_list->ClearRenderTargetView(rt_descriptor, clear_color, 0, nullptr);
+        gc->command_list->ClearRenderTargetView(rt_descriptor, GpuContext::CLEAR_COLOR, 0, nullptr);
     }
 
     draw(game_state);
@@ -723,7 +768,7 @@ static void draw_frame(GameState* game_state)
 
     present_gpu_frame(gc);
 }
-
+//--------------------------------------------------------------------------------------------------
 static void jolt_trace(const char* fmt, ...)
 {
     va_list list;
@@ -734,7 +779,7 @@ static void jolt_trace(const char* fmt, ...)
 
     LOG("[physics] %s", buffer);
 }
-
+//--------------------------------------------------------------------------------------------------
 #ifdef JPH_ENABLE_ASSERTS
 static bool jolt_assert_failed(const char* expression, const char* message, const char* file, u32 line)
 {
@@ -744,51 +789,7 @@ static bool jolt_assert_failed(const char* expression, const char* message, cons
     return true;
 }
 #endif
-
-static constexpr auto OBJECT_LAYER_NON_MOVING = JPH::ObjectLayer(0);
-static constexpr auto OBJECT_LAYER_MOVING = JPH::ObjectLayer(1);
-static constexpr u32 OBJECT_LAYER_COUNT = 2;
-
-static constexpr auto BROAD_PHASE_LAYER_NON_MOVING = JPH::BroadPhaseLayer(0);
-static constexpr auto BROAD_PHASE_LAYER_MOVING = JPH::BroadPhaseLayer(1);
-static constexpr u32 BROAD_PHASE_LAYER_COUNT = 2;
-
-struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
-    virtual bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override {
-        switch (object1) {
-            case OBJECT_LAYER_NON_MOVING: return object2 == OBJECT_LAYER_MOVING;
-            case OBJECT_LAYER_MOVING: return true;
-            default: JPH_ASSERT(false); return false;
-        }
-    }
-};
-
-struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
-    JPH::BroadPhaseLayer object_to_broad_phase[OBJECT_LAYER_COUNT];
-
-    BroadPhaseLayerInterface() {
-        object_to_broad_phase[OBJECT_LAYER_NON_MOVING] = BROAD_PHASE_LAYER_NON_MOVING;
-        object_to_broad_phase[OBJECT_LAYER_MOVING] = BROAD_PHASE_LAYER_MOVING;
-    }
-
-    virtual u32 GetNumBroadPhaseLayers() const override { return BROAD_PHASE_LAYER_COUNT; }
-
-    virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
-        JPH_ASSERT(layer < OBJECT_LAYER_COUNT);
-        return object_to_broad_phase[layer];
-    }
-};
-
-struct ObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
-    virtual bool ShouldCollide(JPH::ObjectLayer layer1, JPH::BroadPhaseLayer layer2) const override {
-        switch (layer1) {
-            case OBJECT_LAYER_NON_MOVING: return layer2 == BROAD_PHASE_LAYER_MOVING;
-            case OBJECT_LAYER_MOVING: return true;
-            default: JPH_ASSERT(false); return false;
-        }
-    }
-};
-
+//--------------------------------------------------------------------------------------------------
 static void init(GameState* game_state)
 {
     assert(game_state);
@@ -797,7 +798,7 @@ static void init(GameState* game_state)
     const f32 dpi_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(nullptr);
     LOG("[game] Window DPI scale: %f", dpi_scale);
 
-    const HWND window = create_window(static_cast<i32>(1200 * dpi_scale), static_cast<i32>(800 * dpi_scale));
+    const HWND window = create_window(GameState::WINDOW_NAME, static_cast<i32>(GameState::WINDOW_WIDTH * dpi_scale), static_cast<i32>(GameState::WINDOW_HEIGHT * dpi_scale));
 
     game_state->gpu.gc = new GpuContext();
     memset(game_state->gpu.gc, 0, sizeof(GpuContext));
@@ -813,7 +814,7 @@ static void init(GameState* game_state)
     ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/Roboto-Medium.ttf", floor(16.0f * dpi_scale));
 
     if (!ImGui_ImplWin32_Init(window)) VHR(E_FAIL);
-    if (!ImGui_ImplDX12_Init(gc->device, GC_MAX_BUFFERED_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gc->gpu_heap, gc->gpu_heap_start_cpu, gc->gpu_heap_start_gpu)) VHR(E_FAIL);
+    if (!ImGui_ImplDX12_Init(gc->device, GpuContext::MAX_BUFFERED_FRAMES, DXGI_FORMAT_R8G8B8A8_UNORM, gc->gpu_heap, gc->gpu_heap_start_cpu, gc->gpu_heap_start_gpu)) VHR(E_FAIL);
 
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
@@ -855,7 +856,7 @@ static void init(GameState* game_state)
             .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
             .NumRenderTargets = 1,
             .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
-            .SampleDesc = { .Count = GC_NUM_MSAA_SAMPLES },
+            .SampleDesc = { .Count = GpuContext::NUM_MSAA_SAMPLES },
         };
 
         VHR(gc->device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&game_state->gpu.pipelines[0])));
@@ -863,11 +864,11 @@ static void init(GameState* game_state)
     }
 
     // Upload buffers
-    for (i32 i = 0; i < GC_MAX_BUFFERED_FRAMES; ++i) {
+    for (i32 i = 0; i < GpuContext::MAX_BUFFERED_FRAMES; ++i) {
         const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_UPLOAD };
         const D3D12_RESOURCE_DESC1 desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = GPU_BUFFER_SIZE_DYNAMIC,
+            .Width = GameState::GPU_BUFFER_SIZE_DYNAMIC,
             .Height = 1,
             .DepthOrArraySize = 1,
             .MipLevels = 1,
@@ -885,7 +886,7 @@ static void init(GameState* game_state)
         const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_DEFAULT };
         const D3D12_RESOURCE_DESC1 desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = GPU_BUFFER_SIZE_STATIC,
+            .Width = GameState::GPU_BUFFER_SIZE_STATIC,
             .Height = 1,
             .DepthOrArraySize = 1,
             .MipLevels = 1,
@@ -900,7 +901,7 @@ static void init(GameState* game_state)
         const D3D12_HEAP_PROPERTIES heap_desc = { .Type = D3D12_HEAP_TYPE_DEFAULT };
         const D3D12_RESOURCE_DESC1 desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = GPU_BUFFER_SIZE_DYNAMIC,
+            .Width = GameState::GPU_BUFFER_SIZE_DYNAMIC,
             .Height = 1,
             .DepthOrArraySize = 1,
             .MipLevels = 1,
@@ -912,7 +913,7 @@ static void init(GameState* game_state)
 
     // Create static meshes and store them in the upload buffer
     {
-        game_state->meshes.resize(MESH_COUNT);
+        game_state->meshes.resize(StaticMesh::NUM);
 
         struct TessellationSink : public ID2D1TessellationSink {
             std::vector<CppHlsl_Vertex> vertices;
@@ -944,7 +945,7 @@ static void init(GameState* game_state)
             VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[MESH_ROUND_RECT_100x100] = { first_vertex, num_vertices };
+            game_state->meshes[StaticMesh::ROUND_RECT_100x100] = { first_vertex, num_vertices };
         }
         {
             const D2D1_ELLIPSE shape = {
@@ -958,7 +959,7 @@ static void init(GameState* game_state)
             VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[MESH_CIRCLE_100] = { first_vertex, num_vertices };
+            game_state->meshes[StaticMesh::CIRCLE_100] = { first_vertex, num_vertices };
         }
         {
             const D2D1_RECT_F shape = { -50.0f, -50.0f, 50.0f, 50.0f };
@@ -970,7 +971,7 @@ static void init(GameState* game_state)
             VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[MESH_RECT_100x100] = { first_vertex, num_vertices };
+            game_state->meshes[StaticMesh::RECT_100x100] = { first_vertex, num_vertices };
         }
         {
             ID2D1PathGeometry* geo = nullptr;
@@ -1008,7 +1009,7 @@ static void init(GameState* game_state)
             VHR(geo1->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[MESH_PATH_00] = { first_vertex, num_vertices };
+            game_state->meshes[StaticMesh::PATH_00] = { first_vertex, num_vertices };
         }
 
         auto* ptr = reinterpret_cast<CppHlsl_Vertex*>(game_state->gpu.upload_buffer_bases[0]);
@@ -1059,7 +1060,7 @@ static void init(GameState* game_state)
             gc->command_list->Barrier(1, &barrier_group);
         }
 
-        gc->command_list->CopyBufferRegion(game_state->gpu.buffer_static, 0, game_state->gpu.upload_buffers[0], 0, GPU_BUFFER_SIZE_DYNAMIC);
+        gc->command_list->CopyBufferRegion(game_state->gpu.buffer_static, 0, game_state->gpu.upload_buffers[0], 0, GameState::GPU_BUFFER_SIZE_DYNAMIC);
 
         VHR(gc->command_list->Close());
 
@@ -1068,16 +1069,16 @@ static void init(GameState* game_state)
         finish_gpu_commands(gc);
     }
 
-    game_state->objects.push_back({ .mesh_index = MESH_ROUND_RECT_100x100 });
+    game_state->objects.push_back({ .mesh_index = StaticMesh::ROUND_RECT_100x100 });
     game_state->cpp_hlsl_objects.push_back({ .x = -400.0f, .y = 400.0f });
 
-    game_state->objects.push_back({ .mesh_index = MESH_RECT_100x100 });
+    game_state->objects.push_back({ .mesh_index = StaticMesh::RECT_100x100 });
     game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = -200.0f });
 
-    game_state->objects.push_back({ .mesh_index = MESH_CIRCLE_100 });
+    game_state->objects.push_back({ .mesh_index = StaticMesh::CIRCLE_100 });
     game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
-    game_state->objects.push_back({ .mesh_index = MESH_PATH_00 });
+    game_state->objects.push_back({ .mesh_index = StaticMesh::PATH_00 });
     game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
     {
@@ -1105,7 +1106,7 @@ static void init(GameState* game_state)
         gc->device->CreateShaderResourceView(game_state->gpu.buffer_dynamic, &desc, { .ptr = gc->gpu_heap_start_cpu.ptr + RDH_OBJECTS_DYNAMIC * gc->gpu_heap_descriptor_size });
     }
 }
-
+//--------------------------------------------------------------------------------------------------
 static void shutdown(GameState* game_state)
 {
     assert(game_state);
@@ -1147,7 +1148,7 @@ static void shutdown(GameState* game_state)
         game_state->gpu.gc = nullptr;
     }
 }
-
+//--------------------------------------------------------------------------------------------------
 static void update(GameState* game_state)
 {
     assert(game_state);
@@ -1158,7 +1159,7 @@ static void update(GameState* game_state)
 
     f64 time;
     f32 delta_time;
-    update_frame_stats(game_state->gpu.gc->window, WINDOW_NAME, &time, &delta_time);
+    update_frame_stats(game_state->gpu.gc->window, GameState::WINDOW_NAME, &time, &delta_time);
 
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -1168,7 +1169,7 @@ static void update(GameState* game_state)
 
     ImGui::Render();
 }
-
+//--------------------------------------------------------------------------------------------------
 static void draw(GameState* game_state)
 {
     assert(game_state);
@@ -1265,7 +1266,7 @@ static void draw(GameState* game_state)
         gc->command_list->DrawInstanced(game_state->meshes[mesh_index].num_vertices, 1, 0, 0);
     }
 }
-
+//--------------------------------------------------------------------------------------------------
 i32 main()
 {
     GameState game_state = {};
@@ -1287,3 +1288,4 @@ i32 main()
 
     return 0;
 }
+//--------------------------------------------------------------------------------------------------
