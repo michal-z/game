@@ -49,12 +49,14 @@ using isize = ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-#define LOG(fmt, ...) do { \
+#define LOG(fmt, ...) do \
+{ \
     fprintf(stderr, (fmt), __VA_ARGS__); \
     fprintf(stderr, " (%s:%d)\n", __FILE__, __LINE__); \
 } while(0)
 
-#define VHR(r) do { \
+#define VHR(r) do \
+{ \
     if (FAILED(r)) { \
         LOG("[%s()] HRESULT error detected (0x%X)", __FUNCTION__, r); \
         assert(false); \
@@ -62,33 +64,36 @@ using f64 = double;
     } \
 } while(0)
 
-#define SAFE_RELEASE(obj) do { \
+#define SAFE_RELEASE(obj) do \
+{ \
     if ((obj)) { \
         (obj)->Release(); \
         (obj) = nullptr; \
     } \
 } while(0)
 
-template<typename F> class defer_finalizer {
+template<typename F> class DeferFinalizer
+{
     F func;
     bool moved;
 public:
-    template<typename T> defer_finalizer(T&& f) : func(std::forward<T>(f)), moved(false) {}
+    template<typename T> DeferFinalizer(T&& f) : func(std::forward<T>(f)), moved(false) {}
 
-    defer_finalizer(const defer_finalizer &) = delete;
+    DeferFinalizer(const DeferFinalizer &) = delete;
 
-    defer_finalizer(defer_finalizer&& other) : func(std::move(other.func)), moved(other.moved) {
+    DeferFinalizer(DeferFinalizer&& other) : func(std::move(other.func)), moved(other.moved) {
         other.moved = true;
     }
 
-    ~defer_finalizer() {
+    ~DeferFinalizer() {
         if (!moved) func();
     }
 };
 
-static struct {
-    template<typename F> defer_finalizer<F> operator<<(F&& f) {
-        return defer_finalizer<F>(std::forward<F>(f));
+static struct
+{
+    template<typename F> DeferFinalizer<F> operator<<(F&& f) {
+        return DeferFinalizer<F>(std::forward<F>(f));
     }
 } __deferrer;
 

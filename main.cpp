@@ -9,7 +9,8 @@ extern "C" {
 #define WITH_D3D12_DEBUG_LAYER 1
 #define WITH_D3D12_GPU_BASED_VALIDATION 0
 //--------------------------------------------------------------------------------------------------
-struct GpuContext {
+struct GpuContext
+{
     static constexpr auto ENABLE_VSYNC = true;
     static constexpr auto MAX_BUFFERED_FRAMES = 2;
     static constexpr auto MAX_GPU_DESCRIPTORS = 16 * 1024;
@@ -58,7 +59,8 @@ struct GpuContext {
     ID3D12Resource2* msaa_srgb_rt;
 };
 //--------------------------------------------------------------------------------------------------
-struct StaticMesh {
+struct StaticMesh
+{
     static constexpr auto ROUND_RECT_100x100 = 0;
     static constexpr auto CIRCLE_100 = 1;
     static constexpr auto RECT_100x100 = 2;
@@ -69,11 +71,13 @@ struct StaticMesh {
     u32 num_vertices;
 };
 //--------------------------------------------------------------------------------------------------
-struct Object {
+struct Object
+{
     u32 mesh_index;
 };
 //--------------------------------------------------------------------------------------------------
-struct GameState {
+struct GameState
+{
     static constexpr auto WINDOW_NAME = "game";
     static constexpr auto WINDOW_WIDTH = 1200;
     static constexpr auto WINDOW_HEIGHT = 800;
@@ -106,26 +110,30 @@ struct GameState {
     } phy;
 };
 //--------------------------------------------------------------------------------------------------
-struct alignas(16) UploadData {
+struct alignas(16) UploadData
+{
     static constexpr auto MAX_DYNAMIC_OBJECTS = 1024;
 
     CppHlsl_FrameState frame_state;
     CppHlsl_Object objects[MAX_DYNAMIC_OBJECTS];
 };
 //--------------------------------------------------------------------------------------------------
-struct ObjectLayers {
+struct ObjectLayers
+{
     static constexpr auto NON_MOVING = JPH::ObjectLayer(0);
     static constexpr auto MOVING = JPH::ObjectLayer(1);
     static constexpr auto NUM = 2;
 };
 //--------------------------------------------------------------------------------------------------
-struct BroadPhaseLayers {
+struct BroadPhaseLayers
+{
     static constexpr auto NON_MOVING = JPH::BroadPhaseLayer(0);
     static constexpr auto MOVING = JPH::BroadPhaseLayer(1);
     static constexpr auto NUM = 2;
 };
 //--------------------------------------------------------------------------------------------------
-struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
+struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter
+{
     virtual bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override {
         switch (object1) {
             case ObjectLayers::NON_MOVING: return object2 == ObjectLayers::MOVING;
@@ -135,7 +143,8 @@ struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
     }
 };
 //--------------------------------------------------------------------------------------------------
-struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
+struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface
+{
     JPH::BroadPhaseLayer object_to_broad_phase[ObjectLayers::NUM];
 
     BroadPhaseLayerInterface() {
@@ -151,7 +160,8 @@ struct BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
     }
 };
 //--------------------------------------------------------------------------------------------------
-struct ObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
+struct ObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter
+{
     virtual bool ShouldCollide(JPH::ObjectLayer layer1, JPH::BroadPhaseLayer layer2) const override {
         switch (layer1) {
             case ObjectLayers::NON_MOVING: return layer2 == BroadPhaseLayers::MOVING;
@@ -1269,8 +1279,12 @@ static void draw(GameState* game_state)
 //--------------------------------------------------------------------------------------------------
 i32 main()
 {
-    GameState game_state = {};
-    init(&game_state);
+    auto game_state = new GameState();
+    memset(game_state, 0, sizeof(GameState));
+    defer { delete game_state; };
+
+    init(game_state);
+    defer { shutdown(game_state); };
 
     while (true) {
         MSG msg = {};
@@ -1279,12 +1293,10 @@ i32 main()
             DispatchMessage(&msg);
             if (msg.message == WM_QUIT) break;
         } else {
-            update(&game_state);
-            draw_frame(&game_state);
+            update(game_state);
+            draw_frame(game_state);
         }
     }
-
-    shutdown(&game_state);
 
     return 0;
 }
