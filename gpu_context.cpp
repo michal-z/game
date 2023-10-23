@@ -142,7 +142,6 @@ struct GpuContext
 #if WITH_D3D12_DEBUG_LAYER
         VHR(gc->command_queue->QueryInterface(IID_PPV_ARGS(&gc->debug_command_queue)));
 #endif
-
         LOG("[graphics] Command queue created");
 
         for (i32 i = 0; i < MAX_BUFFERED_FRAMES; ++i) {
@@ -156,7 +155,6 @@ struct GpuContext
 #if WITH_D3D12_DEBUG_LAYER
         VHR(gc->command_list->QueryInterface(IID_PPV_ARGS(&gc->debug_command_list)));
 #endif
-
         LOG("[graphics] Command list created");
 
         //
@@ -276,7 +274,6 @@ struct GpuContext
         SAFE_RELEASE(gc->device);
         SAFE_RELEASE(gc->adapter);
         SAFE_RELEASE(gc->dxgi_factory);
-
 #if WITH_D3D12_DEBUG_LAYER
         SAFE_RELEASE(gc->debug_command_list);
         SAFE_RELEASE(gc->debug_command_queue);
