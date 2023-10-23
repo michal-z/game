@@ -102,8 +102,7 @@ fn jolt_assert_failed(const char* expression, const char* message, const char* f
 {
     LOG("[physics] Assert failed (%s): (%s:%d) %s", expression, file, line, message ? message : "");
 
-    // Breakpoint
-    return true;
+    return true; // breakpoint
 }
 #endif
 
@@ -263,7 +262,7 @@ struct GameState
         {
             game_state->meshes.resize(StaticMesh::NUM);
 
-            struct TessellationSink : public ID2D1TessellationSink {
+            struct TessellationSink final : public ID2D1TessellationSink {
                 std::vector<CppHlsl_Vertex> vertices;
 
                 virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override {
@@ -745,7 +744,7 @@ struct GameState
             const Object* obj = &game_state->objects[i];
             const u32 mesh_index = obj->mesh_index;
 
-            const u32 root_consts[2] = {
+            const u32 root_consts[] = {
                 game_state->meshes[mesh_index].first_vertex,
                 static_cast<u32>(i), // object index
             };
