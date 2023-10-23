@@ -49,6 +49,9 @@ using isize = ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
+#define fn static auto
+#define let static constexpr auto
+
 #define LOG(fmt, ...) do \
 { \
     fprintf(stderr, (fmt), __VA_ARGS__); \
