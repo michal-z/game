@@ -132,6 +132,9 @@ struct GameState
     struct {
         JPH::TempAllocatorImpl* temp_allocator;
         JPH::JobSystemThreadPool* job_system;
+        ObjectLayerPairFilter* object_layer_pair_filter;
+        BroadPhaseLayerInterface* broad_phase_layer_interface;
+        ObjectVsBroadPhaseLayerFilter* object_vs_broad_phase_layer_filter;
     } phy;
 };
 
@@ -148,7 +151,7 @@ func init(GameState* game_state) -> void
     game_state->gpu.gc = new GpuContext();
     memset(game_state->gpu.gc, 0, sizeof(GpuContext));
 
-    if (!init_subsystem(game_state->gpu.gc, window)) {
+    if (!init_gpu_context(game_state->gpu.gc, window)) {
         // TODO: Display message box in release mode.
         VHR(E_FAIL);
     }
@@ -179,6 +182,9 @@ func init(GameState* game_state) -> void
 
     game_state->phy.temp_allocator = new JPH::TempAllocatorImpl(10 * 1024 * 1024);
     game_state->phy.job_system = new JPH::JobSystemThreadPool(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers);
+    game_state->phy.object_layer_pair_filter = new ObjectLayerPairFilter();
+    game_state->phy.broad_phase_layer_interface = new BroadPhaseLayerInterface();
+    game_state->phy.object_vs_broad_phase_layer_filter = new ObjectVsBroadPhaseLayerFilter();
 
     {
         const std::vector<u8> vs = load_file("assets/s00_vs.cso");
@@ -452,7 +458,7 @@ func init(GameState* game_state) -> void
     }
 }
 
-func deinit(GameState* game_state) -> void
+func shutdown(GameState* game_state) -> void
 {
     assert(game_state);
 
@@ -481,6 +487,18 @@ func deinit(GameState* game_state) -> void
         delete game_state->phy.temp_allocator;
         game_state->phy.temp_allocator = nullptr;
     }
+    if (game_state->phy.object_layer_pair_filter) {
+        delete game_state->phy.object_layer_pair_filter;
+        game_state->phy.object_layer_pair_filter = nullptr;
+    }
+    if (game_state->phy.broad_phase_layer_interface) {
+        delete game_state->phy.broad_phase_layer_interface;
+        game_state->phy.broad_phase_layer_interface = nullptr;
+    }
+    if (game_state->phy.object_vs_broad_phase_layer_filter) {
+        delete game_state->phy.object_vs_broad_phase_layer_filter;
+        game_state->phy.object_vs_broad_phase_layer_filter = nullptr;
+    }
 
     JPH::UnregisterTypes();
 
@@ -488,7 +506,7 @@ func deinit(GameState* game_state) -> void
     JPH::Factory::sInstance = nullptr;
 
     if (game_state->gpu.gc) {
-        shutdown_subsystem(game_state->gpu.gc);
+        shutdown_gpu_context(game_state->gpu.gc);
         delete game_state->gpu.gc;
         game_state->gpu.gc = nullptr;
     }
@@ -766,7 +784,7 @@ func main() -> i32
     defer { delete game_state; };
 
     init(game_state);
-    defer { deinit(game_state); };
+    defer { shutdown(game_state); };
 
     while (true) {
         MSG msg = {};

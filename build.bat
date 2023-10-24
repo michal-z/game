@@ -200,12 +200,12 @@ IF NOT EXIST jolt.lib (
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT EXIST pch.lib (
- cl %CPP_FLAGS% /Fo"pch.lib" /c /Yc"game_pch.h" "game_pch.cpp"
+ cl %CPP_FLAGS% /Fo"pch.lib" /Fp"game.pch" /c /Yc"game_pch.h" "game_pch.cpp"
 ) & if ERRORLEVEL 1 GOTO error
 
 IF NOT "%1"=="hlsl" (
  IF EXIST %NAME%.exe DEL %NAME%.exe
- cl %CPP_FLAGS% /Yu"game_pch.h" game_main.cpp /link %LINK_FLAGS%^
+ cl %CPP_FLAGS% /Fp"game.pch" /Yu"game_pch.h" game_main.cpp /link %LINK_FLAGS%^
   pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib d2d1.lib
 ) & if ERRORLEVEL 1 GOTO error
 
@@ -222,6 +222,6 @@ IF EXIST *.exp DEL *.exp
 IF "%1" == "run" IF EXIST %NAME%.exe %NAME%.exe
 
 IF "%1"=="hlsl" (
- %DXC% %HLSL_FLAGS% /T vs_%HLSL_SM% /E s00_vs /D_S00 game_shaders.hlsl /Fo %HLSL_OUT_DIR%/s00_vs.cso
- %DXC% %HLSL_FLAGS% /T ps_%HLSL_SM% /E s00_ps /D_S00 game_shaders.hlsl /Fo %HLSL_OUT_DIR%/s00_ps.cso
+ %DXC% %HLSL_FLAGS% /T vs_%HLSL_SM% /E s00_vs /D_S00 game_shaders.cpp /Fo %HLSL_OUT_DIR%/s00_vs.cso
+ %DXC% %HLSL_FLAGS% /T ps_%HLSL_SM% /E s00_ps /D_S00 game_shaders.cpp /Fo %HLSL_OUT_DIR%/s00_ps.cso
 )

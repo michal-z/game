@@ -68,7 +68,7 @@ func create_msaa_srgb_render_target(GpuContext* gc) -> void
     LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", GPU_NUM_MSAA_SAMPLES, gc->window_width, gc->window_height);
 }
 
-func init_subsystem(GpuContext* gc, HWND window) -> bool
+func init_gpu_context(GpuContext* gc, HWND window) -> bool
 {
     assert(gc && gc->device == nullptr);
 
@@ -274,7 +274,7 @@ func init_subsystem(GpuContext* gc, HWND window) -> bool
     return true;
 }
 
-func shutdown_subsystem(GpuContext* gc) -> void
+func shutdown_gpu_context(GpuContext* gc) -> void
 {
     assert(gc);
 
