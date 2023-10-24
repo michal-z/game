@@ -3,8 +3,9 @@ setlocal enableextensions enabledelayedexpansion
 
 set NAME=game
 set CONFIG=D
-
-set CPP_FLAGS=/std:c++20 /W4 /wd4127 /wd4008 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
+set CPP_FLAGS=/std:c++20 /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
+ /Wall /wd4127 /wd4820 /wd4668 /wd5246 /wd5039 /wd4625 /wd4626^
+ /wd5026 /wd5027 /wd4008 /wd5045 /wd4710 /wd4711 /WX^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
  /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
@@ -188,7 +189,9 @@ IF "%1"=="clean" (
 )
 
 IF NOT EXIST imgui.lib (
- cl %CPP_FLAGS% /c %SRC_IMGUI%
+ cl %CPP_FLAGS%^
+  /wd4365 /wd5262 /wd4191 /wd4774 /wd5219 /wd4514^
+  /c %SRC_IMGUI%
  lib %LIB_FLAGS% *.obj /OUT:"imgui.lib"
  IF EXIST *.obj DEL *.obj
 ) & if ERRORLEVEL 1 GOTO error

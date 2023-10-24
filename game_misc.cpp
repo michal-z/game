@@ -16,7 +16,6 @@ func CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, L
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
-            break;
         case WM_GETMINMAXINFO:
             {
                 auto info = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -66,7 +65,7 @@ func get_time() -> f64
     }
     LARGE_INTEGER counter;
     QueryPerformanceCounter(&counter);
-    return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
+    return static_cast<f64>(counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
 }
 
 func update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) -> void
@@ -104,10 +103,10 @@ func load_file(const char* filename) -> std::vector<u8>
     const i32 size_in_bytes = ftell(file);
     assert(size_in_bytes > 0);
     fseek(file, 0, SEEK_SET);
-    std::vector<u8> data(size_in_bytes);
-    const usize num_read_bytes = fread(&data[0], 1, size_in_bytes, file);
+    std::vector<u8> data(static_cast<usize>(size_in_bytes));
+    const usize num_read_bytes = fread(&data[0], 1, static_cast<usize>(size_in_bytes), file);
     (void)num_read_bytes;
     fclose(file);
-    assert(size_in_bytes == num_read_bytes);
+    assert(static_cast<usize>(size_in_bytes) == num_read_bytes);
     return data;
 }

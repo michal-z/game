@@ -60,7 +60,7 @@ using f64 = double;
 #define VHR(r) do \
 { \
     if (FAILED(r)) { \
-        LOG("[%s()] HRESULT error detected (0x%X)", __FUNCTION__, r); \
+        LOG("[%s()] HRESULT error detected (0x%lX)", __FUNCTION__, r); \
         assert(false); \
         ExitProcess(1); \
     } \
@@ -82,6 +82,7 @@ public:
     template<typename T> DeferFinalizer(T&& f) : fn(std::forward<T>(f)), moved(false) {}
 
     DeferFinalizer(const DeferFinalizer &) = delete;
+    DeferFinalizer& operator=(const DeferFinalizer &) = delete;
 
     DeferFinalizer(DeferFinalizer&& other) : fn(std::move(other.fn)), moved(other.moved) {
         other.moved = true;

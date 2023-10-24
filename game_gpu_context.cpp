@@ -212,7 +212,7 @@ func init_gpu_context(GpuContext* gc, HWND window) -> bool
 
     VHR(gc->dxgi_factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES));
 
-    for (i32 i = 0; i < GPU_MAX_BUFFERED_FRAMES; ++i) {
+    for (u32 i = 0; i < GPU_MAX_BUFFERED_FRAMES; ++i) {
         VHR(gc->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gc->swap_chain_buffers[i])));
     }
 
@@ -337,7 +337,7 @@ func handle_window_resize(GpuContext* gc) -> bool
     }
 
     if (current_rect.right != gc->window_width || current_rect.bottom != gc->window_height) {
-        LOG("[graphics] Window resized to %dx%d", current_rect.right, current_rect.bottom);
+        LOG("[graphics] Window resized to %ldx%ld", current_rect.right, current_rect.bottom);
 
         finish_gpu_commands(gc);
 
@@ -345,7 +345,7 @@ func handle_window_resize(GpuContext* gc) -> bool
 
         VHR(gc->swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, gc->swap_chain_flags));
 
-        for (i32 i = 0; i < GPU_MAX_BUFFERED_FRAMES; ++i) {
+        for (u32 i = 0; i < GPU_MAX_BUFFERED_FRAMES; ++i) {
             VHR(gc->swap_chain->GetBuffer(i, IID_PPV_ARGS(&gc->swap_chain_buffers[i])));
         }
 

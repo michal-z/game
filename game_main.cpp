@@ -1,5 +1,5 @@
 #include "game_pch.h"
-#include "game.h"
+#include "game_main.h"
 #include "game_cpp_hlsl_common.h"
 #include "game_misc.cpp"
 #include "game_gpu_context.cpp"
@@ -690,10 +690,10 @@ func draw(GameState* game_state) -> void
         const f32 r = 500.0f;
         XMMATRIX xform;
         if (gc->window_width >= gc->window_height) {
-            const float aspect = static_cast<f32>(gc->window_width) / gc->window_height;
+            const float aspect = static_cast<f32>(gc->window_width) / static_cast<f32>(gc->window_height);
             xform = XMMatrixOrthographicOffCenterLH(-r * aspect, r * aspect, -r, r, -1.0f, 1.0f);
         } else {
-            const float aspect = static_cast<f32>(gc->window_height) / gc->window_width;
+            const float aspect = static_cast<f32>(gc->window_height) / static_cast<f32>(gc->window_width);
             xform = XMMatrixOrthographicOffCenterLH(-r, r, -r * aspect, r * aspect, -1.0f, 1.0f);
         }
 
