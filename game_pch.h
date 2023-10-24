@@ -49,8 +49,7 @@ using isize = ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-#define fn static auto
-#define let static constexpr auto
+#define func static auto
 
 #define LOG(fmt, ...) do \
 { \
@@ -77,19 +76,19 @@ using f64 = double;
 
 template<typename F> class DeferFinalizer
 {
-    F func;
+    F fn;
     bool moved;
 public:
-    template<typename T> DeferFinalizer(T&& f) : func(std::forward<T>(f)), moved(false) {}
+    template<typename T> DeferFinalizer(T&& f) : fn(std::forward<T>(f)), moved(false) {}
 
     DeferFinalizer(const DeferFinalizer &) = delete;
 
-    DeferFinalizer(DeferFinalizer&& other) : func(std::move(other.func)), moved(other.moved) {
+    DeferFinalizer(DeferFinalizer&& other) : fn(std::move(other.fn)), moved(other.moved) {
         other.moved = true;
     }
 
     ~DeferFinalizer() {
-        if (!moved) func();
+        if (!moved) fn();
     }
 };
 

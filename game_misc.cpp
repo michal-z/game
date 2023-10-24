@@ -1,4 +1,4 @@
-fn CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT
+func CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT
 {
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -28,7 +28,7 @@ fn CALLBACK process_window_message(HWND window, UINT message, WPARAM wparam, LPA
     return DefWindowProc(window, message, wparam, lparam);
 }
 
-fn create_window(const char* name, i32 width, i32 height) -> HWND
+func create_window(const char* name, i32 width, i32 height) -> HWND
 {
     const WNDCLASSEXA winclass = {
         .cbSize = sizeof(winclass),
@@ -56,7 +56,7 @@ fn create_window(const char* name, i32 width, i32 height) -> HWND
     return window;
 }
 
-fn get_time() -> f64
+func get_time() -> f64
 {
     static LARGE_INTEGER start_counter;
     static LARGE_INTEGER frequency;
@@ -69,7 +69,7 @@ fn get_time() -> f64
     return (counter.QuadPart - start_counter.QuadPart) / static_cast<f64>(frequency.QuadPart);
 }
 
-fn update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) -> void
+func update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_delta_time) -> void
 {
     static f64 previous_time = -1.0;
     static f64 header_refresh_time = 0.0;
@@ -96,7 +96,7 @@ fn update_frame_stats(HWND window, const char* name, f64* out_time, f32* out_del
     num_frames++;
 }
 
-fn load_file(const char* filename) -> std::vector<u8>
+func load_file(const char* filename) -> std::vector<u8>
 {
     FILE* file = fopen(filename, "rb");
     assert(file);

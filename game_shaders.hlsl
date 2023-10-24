@@ -1,4 +1,4 @@
-#include "cpp_hlsl_common.h"
+#include "game_cpp_hlsl_common.h"
 
 #if defined(_S00)
 

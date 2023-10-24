@@ -4,15 +4,17 @@
 #define float4x4 XMFLOAT4X4
 #endif
 
-static const int RDH_FRAME_STATE = 1;
-static const int RDH_VERTEX_BUFFER_STATIC = 2;
-static const int RDH_OBJECTS_DYNAMIC = 3;
+#define RDH_FRAME_STATE 1
+#define RDH_VERTEX_BUFFER_STATIC 2
+#define RDH_OBJECTS_DYNAMIC 3
 
-struct CppHlsl_Vertex {
+struct CppHlsl_Vertex
+{
     float x, y;
 };
 
-struct CppHlsl_Object {
+struct CppHlsl_Object
+{
     float x, y;
     float scalex, scaley;
     float rotation_in_radians;
@@ -20,7 +22,8 @@ struct CppHlsl_Object {
     float _padding[2];
 };
 
-struct CppHlsl_FrameState {
+struct CppHlsl_FrameState
+{
     float4x4 proj;
     float _padding[112];
 };
