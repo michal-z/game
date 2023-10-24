@@ -1,12 +1,3 @@
-#define WITH_D3D12_DEBUG_LAYER 1
-#define WITH_D3D12_GPU_BASED_VALIDATION 0
-
-#define GPU_ENABLE_VSYNC 1
-#define GPU_MAX_BUFFERED_FRAMES 2
-#define GPU_MAX_DESCRIPTORS (16 * 1024)
-#define GPU_NUM_MSAA_SAMPLES 8
-#define GPU_CLEAR_COLOR { 0.0f, 0.0f, 0.0f, 0.0f }
-
 struct GpuContext
 {
     HWND window;
@@ -77,7 +68,7 @@ func create_msaa_srgb_render_target(GpuContext* gc) -> void
     LOG("[graphics] MSAAx%d SRGB render target created (%dx%d)", GPU_NUM_MSAA_SAMPLES, gc->window_width, gc->window_height);
 }
 
-func init_gpu_context(GpuContext* gc, HWND window) -> bool
+func init_subsystem(GpuContext* gc, HWND window) -> bool
 {
     assert(gc && gc->device == nullptr);
 
@@ -283,7 +274,7 @@ func init_gpu_context(GpuContext* gc, HWND window) -> bool
     return true;
 }
 
-func shutdown_gpu_context(GpuContext* gc) -> void
+func shutdown_subsystem(GpuContext* gc) -> void
 {
     assert(gc);
 

@@ -1,4 +1,5 @@
 #include "game_pch.h"
+#include "game.h"
 #include "game_cpp_hlsl_common.h"
 #include "game_misc.cpp"
 #include "game_gpu_context.cpp"
@@ -36,11 +37,11 @@ struct alignas(16) UploadData
 
 static constexpr auto OBJECT_LAYER_NON_MOVING = JPH::ObjectLayer(0);
 static constexpr auto OBJECT_LAYER_MOVING = JPH::ObjectLayer(1);
-static constexpr auto OBJECT_LAYER_NUM = 2;
+#define OBJECT_LAYER_NUM 2
 
 static constexpr auto BROAD_PHASE_LAYER_NON_MOVING = JPH::BroadPhaseLayer(0);
 static constexpr auto BROAD_PHASE_LAYER_MOVING = JPH::BroadPhaseLayer(1);
-static constexpr auto BROAD_PHASE_LAYER_NUM = 2;
+#define BROAD_PHASE_LAYER_NUM 2
 
 struct ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter
 {
@@ -147,7 +148,7 @@ func init(GameState* game_state) -> void
     game_state->gpu.gc = new GpuContext();
     memset(game_state->gpu.gc, 0, sizeof(GpuContext));
 
-    if (!init_gpu_context(game_state->gpu.gc, window)) {
+    if (!init_subsystem(game_state->gpu.gc, window)) {
         // TODO: Display message box in release mode.
         VHR(E_FAIL);
     }
@@ -487,7 +488,7 @@ func deinit(GameState* game_state) -> void
     JPH::Factory::sInstance = nullptr;
 
     if (game_state->gpu.gc) {
-        shutdown_gpu_context(game_state->gpu.gc);
+        shutdown_subsystem(game_state->gpu.gc);
         delete game_state->gpu.gc;
         game_state->gpu.gc = nullptr;
     }
