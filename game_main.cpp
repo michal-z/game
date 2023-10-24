@@ -758,7 +758,7 @@ func draw(GameState* game_state) -> void
     }
 }
 
-i32 main()
+func main() -> i32
 {
     auto game_state = new GameState();
     memset(game_state, 0, sizeof(GameState));

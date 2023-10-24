@@ -4,7 +4,7 @@ setlocal enableextensions enabledelayedexpansion
 set NAME=game
 set CONFIG=D
 
-set CPP_FLAGS=/std:c++20 /W4 /wd4127 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
+set CPP_FLAGS=/std:c++20 /W4 /wd4127 /wd4008 /WX /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
  /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
