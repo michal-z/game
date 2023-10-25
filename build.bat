@@ -4,15 +4,18 @@ setlocal enableextensions enabledelayedexpansion
 set NAME=game
 set CONFIG=D
 set CPP_FLAGS=/std:c++20 /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
- /Wall /wd4127 /wd4820 /wd4668 /wd5246 /wd5039 /wd4625 /wd4626^
- /wd5026 /wd5027 /wd4008 /wd5045 /wd4710 /wd4711 /WX^
+ /Wall /wd4127 /wd4820 /wd5246 /wd5039 /wd4625 /wd4626^
+ /wd5026 /wd5027 /wd4008 /wd5045 /wd4710 /wd4711 /wd4464 /WX^
  /fp:except- /fp:precise^
  /D"_CRT_SECURE_NO_WARNINGS"^
  /D"JPH_CROSS_PLATFORM_DETERMINISTIC"^
  /D"JPH_DEBUG_RENDERER"^
+ /D"_TRACY_ENABLE"^
+ /D"_TRACY_CALLSTACK"^
  /I"external/d3d12"^
  /I"external/imgui"^
  /I"external/directxmath"^
+ /I"external/tracy"^
  /I"external"
 
 if %CONFIG%==D set CPP_FLAGS=%CPP_FLAGS% /GS /Zi /Od /D"_DEBUG" /MTd /RTCs
@@ -41,6 +44,9 @@ set SRC_IMGUI=%SRC_IMGUI_ROOT%\imgui.cpp^
  %SRC_IMGUI_ROOT%\imgui_widgets.cpp^
  %SRC_IMGUI_ROOT%\imgui_impl_win32.cpp^
  %SRC_IMGUI_ROOT%\imgui_impl_dx12.cpp
+
+set SRC_TRACY_ROOT=external\tracy
+set SRC_TRACY=%SRC_TRACY_ROOT%\TracyClient.cpp
 
 set SRC_JOLT_ROOT=external\jolt
 set SRC_JOLT=%SRC_JOLT_ROOT%\AABBTree\AABBTreeBuilder.cpp^
@@ -190,7 +196,7 @@ IF "%1"=="clean" (
 
 IF NOT EXIST imgui.lib (
  cl %CPP_FLAGS%^
-  /wd4365 /wd5262 /wd4191 /wd4774 /wd5219 /wd4514^
+  /wd4365 /wd5262 /wd4191 /wd4668 /wd4774 /wd5219 /wd4514^
   /c %SRC_IMGUI%
  lib %LIB_FLAGS% *.obj /OUT:"imgui.lib"
  IF EXIST *.obj DEL *.obj
@@ -202,6 +208,12 @@ IF NOT EXIST jolt.lib (
  IF EXIST *.obj DEL *.obj
 ) & if ERRORLEVEL 1 GOTO error
 
+IF NOT EXIST tracy.lib (
+ cl %CPP_FLAGS% /wd4191 /wd4365 /c %SRC_TRACY%
+ lib %LIB_FLAGS% *.obj /OUT:"tracy.lib"
+ IF EXIST *.obj DEL *.obj
+) & if ERRORLEVEL 1 GOTO error
+
 IF NOT EXIST pch.lib (
  cl %CPP_FLAGS% /Fo"pch.lib" /Fp"game.pch" /c /Yc"game_pch.h" "game_pch.cpp"
 ) & if ERRORLEVEL 1 GOTO error
@@ -209,7 +221,7 @@ IF NOT EXIST pch.lib (
 IF NOT "%1"=="hlsl" (
  IF EXIST %NAME%.exe DEL %NAME%.exe
  cl %CPP_FLAGS% /Fp"game.pch" /Yu"game_pch.h" game_main.cpp /link %LINK_FLAGS%^
-  pch.lib imgui.lib jolt.lib kernel32.lib user32.lib dxgi.lib d3d12.lib d2d1.lib
+  pch.lib imgui.lib jolt.lib tracy.lib kernel32.lib user32.lib dxgi.lib d3d12.lib d2d1.lib
 ) & if ERRORLEVEL 1 GOTO error
 
 GOTO end

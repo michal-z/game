@@ -33,8 +33,18 @@
 #include "Jolt/Physics/Body/BodyCreationSettings.h"
 #include "Jolt/Physics/Body/BodyActivationListener.h"
 
+#pragma warning(push)
+#pragma warning(disable:4668)
 #include "DirectXMath.h"
+#pragma warning(pop)
 using namespace DirectX;
+
+#pragma warning(push)
+#pragma warning(disable:4365)
+#pragma warning(disable:4100)
+#include "tracy/Tracy.hpp"
+#include "tracy/TracyD3D12.hpp"
+#pragma warning(pop)
 
 using u64 = uint64_t;
 using u32 = uint32_t;
