@@ -29,8 +29,8 @@ set LINK_FLAGS=/INCREMENTAL:NO /OUT:%NAME%.exe
 if %CONFIG%==D set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 if %CONFIG%==R set LINK_FLAGS=%LINK_FLAGS%
 
-set DXC="d3d12/dxc.exe"
-set HLSL_OUT_DIR="assets"
+set DXC=d3d12\dxc.exe
+set HLSL_OUT_DIR=assets
 set HLSL_SM=6_6
 set HLSL_FLAGS=/WX /Ges /HV 2021 /nologo
 if %CONFIG%==D set HLSL_FLAGS=%HLSL_FLAGS% /Od /Zi /Qembed_debug
