@@ -167,7 +167,13 @@ func init(GameState* game_state) -> void
     ImGui::GetStyle().ScaleAllSizes(dpi_scale);
 
     {
-        const D2D1_FACTORY_OPTIONS options = { .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION };
+        const D2D1_FACTORY_OPTIONS options = {
+#if WITH_D3D12_DEBUG_LAYER
+            .debugLevel = D2D1_DEBUG_LEVEL_INFORMATION,
+#else
+            .debugLevel = D2D1_DEBUG_LEVEL_NONE,
+#endif
+        };
         VHR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(game_state->gpu.d2d_factory), &options, reinterpret_cast<void**>(&game_state->gpu.d2d_factory)));
     }
 

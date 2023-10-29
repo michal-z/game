@@ -91,8 +91,8 @@ template<typename F> class DeferFinalizer
 public:
     template<typename T> DeferFinalizer(T&& f) : fn(std::forward<T>(f)), moved(false) {}
 
-    DeferFinalizer(const DeferFinalizer &) = delete;
-    DeferFinalizer& operator=(const DeferFinalizer &) = delete;
+    DeferFinalizer(const DeferFinalizer&) = delete;
+    DeferFinalizer& operator=(const DeferFinalizer&) = delete;
 
     DeferFinalizer(DeferFinalizer&& other) : fn(std::move(other.fn)), moved(other.moved) {
         other.moved = true;

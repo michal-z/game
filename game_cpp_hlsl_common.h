@@ -1,5 +1,3 @@
-#pragma once
-
 #ifdef __cplusplus
 #define float4x4 XMFLOAT4X4
 #endif
