@@ -11,9 +11,9 @@ extern "C" {
 
 enum StaticMeshType
 {
-    STATIC_MESH_ROUND_RECT_100x100,
-    STATIC_MESH_CIRCLE_100,
-    STATIC_MESH_RECT_100x100,
+    STATIC_MESH_ROUND_RECT_1x1,
+    STATIC_MESH_CIRCLE_1,
+    STATIC_MESH_RECT_1x1,
     STATIC_MESH_PATH_00,
     STATIC_MESH_NUM,
 };
@@ -272,15 +272,18 @@ func init(GameState* game_state) -> void
     {
         game_state->meshes.resize(STATIC_MESH_NUM);
 
+        constexpr f32 scale = 100.0f;
+        constexpr f32 rcp_scale = 1.0f / scale;
+
         struct TessellationSink final : public ID2D1TessellationSink {
             std::vector<CppHlsl_Vertex> vertices;
 
             virtual void AddTriangles(const D2D1_TRIANGLE* triangles, u32 num_triangles) override {
                 for (u32 i = 0; i < num_triangles; ++i) {
                     const D2D1_TRIANGLE* tri = &triangles[i];
-                    vertices.push_back({ tri->point1.x, tri->point1.y });
-                    vertices.push_back({ tri->point2.x, tri->point2.y });
-                    vertices.push_back({ tri->point3.x, tri->point3.y });
+                    vertices.push_back({ rcp_scale * tri->point1.x, rcp_scale * tri->point1.y });
+                    vertices.push_back({ rcp_scale * tri->point2.x, rcp_scale * tri->point2.y });
+                    vertices.push_back({ rcp_scale * tri->point3.x, rcp_scale * tri->point3.y });
                 }
             }
 
@@ -292,43 +295,43 @@ func init(GameState* game_state) -> void
 
         {
             const D2D1_ROUNDED_RECT shape = {
-                .rect = { -50.0f, -50.0f, 50.0f, 50.0f }, .radiusX = 25.0f, .radiusY = 25.0f,
+                .rect = { -0.5f, -0.5f, 0.5f, 0.5f }, .radiusX = 0.25f, .radiusY = 0.25f,
             };
             ID2D1RoundedRectangleGeometry* geo = nullptr;
             VHR(game_state->gpu.d2d_factory->CreateRoundedRectangleGeometry(&shape, &geo));
             defer { SAFE_RELEASE(geo); };
 
             const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
-            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            VHR(geo->Tessellate({ scale, 0.0f, 0.0f, scale, 0.0f, 0.0f }, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[STATIC_MESH_ROUND_RECT_100x100] = { first_vertex, num_vertices };
+            game_state->meshes[STATIC_MESH_ROUND_RECT_1x1] = { first_vertex, num_vertices };
         }
         {
             const D2D1_ELLIPSE shape = {
-                .point = { 0.0f, 0.0f }, .radiusX = 100.0f, .radiusY = 100.0f,
+                .point = { 0.0f, 0.0f }, .radiusX = 1.0f, .radiusY = 1.0f,
             };
             ID2D1EllipseGeometry* geo = nullptr;
             VHR(game_state->gpu.d2d_factory->CreateEllipseGeometry(&shape, &geo));
             defer { SAFE_RELEASE(geo); };
 
             const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
-            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            VHR(geo->Tessellate({ scale, 0.0f, 0.0f, scale, 0.0f, 0.0f }, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[STATIC_MESH_CIRCLE_100] = { first_vertex, num_vertices };
+            game_state->meshes[STATIC_MESH_CIRCLE_1] = { first_vertex, num_vertices };
         }
         {
-            const D2D1_RECT_F shape = { -50.0f, -50.0f, 50.0f, 50.0f };
+            const D2D1_RECT_F shape = { -0.5f, -0.5f, 0.5f, 0.5f };
             ID2D1RectangleGeometry* geo = nullptr;
             VHR(game_state->gpu.d2d_factory->CreateRectangleGeometry(&shape, &geo));
             defer { SAFE_RELEASE(geo); };
 
             const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
-            VHR(geo->Tessellate(nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
+            VHR(geo->Tessellate({ scale, 0.0f, 0.0f, scale, 0.0f, 0.0f }, D2D1_DEFAULT_FLATTENING_TOLERANCE, &tess_sink));
             const u32 num_vertices = static_cast<u32>(tess_sink.vertices.size()) - first_vertex;
 
-            game_state->meshes[STATIC_MESH_RECT_100x100] = { first_vertex, num_vertices };
+            game_state->meshes[STATIC_MESH_RECT_1x1] = { first_vertex, num_vertices };
         }
         {
             ID2D1PathGeometry* geo = nullptr;
@@ -339,15 +342,15 @@ func init(GameState* game_state) -> void
             VHR(geo->Open(&sink));
             defer { SAFE_RELEASE(sink); };
 
-            sink->BeginFigure({ 0.0f, 200.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddLine({ 200.0f, 0.0f });
-            sink->AddLine({ 0.0f, -200.0f });
-            sink->AddLine({ -200.0f, 0.0f });
+            sink->BeginFigure({ 0.0f, 2.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddLine({ 2.0f, 0.0f });
+            sink->AddLine({ 0.0f, -2.0f });
+            sink->AddLine({ -2.0f, 0.0f });
             sink->EndFigure(D2D1_FIGURE_END_OPEN);
 
-            sink->BeginFigure({ -400.0f, 0.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddBezier({ { -400.0f, -400.0f }, { -100.0f, -300.0f }, { 0.0f, -400.0f } });
-            sink->AddBezier({ { 100.0f, -300.0f }, { 400.0f, -400.0f }, { 400.0f, 0.0f } });
+            sink->BeginFigure({ -4.0f, 0.0f }, D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddBezier({ { -4.0f, -4.0f }, { -1.0f, -3.0f }, { 0.0f, -4.0f } });
+            sink->AddBezier({ { 1.0f, -3.0f }, { 4.0f, -4.0f }, { 4.0f, 0.0f } });
             sink->EndFigure(D2D1_FIGURE_END_OPEN);
 
             VHR(sink->Close());
@@ -359,7 +362,7 @@ func init(GameState* game_state) -> void
             ID2D1GeometrySink* sink1 = nullptr;
             VHR(geo1->Open(&sink1));
             defer { SAFE_RELEASE(sink1); };
-            VHR(geo->Widen(50.0f, nullptr, nullptr, D2D1_DEFAULT_FLATTENING_TOLERANCE, sink1));
+            VHR(geo->Widen(0.5f, nullptr, { scale, 0.0f, 0.0f, scale, 0.0f, 0.0f }, D2D1_DEFAULT_FLATTENING_TOLERANCE, sink1));
             VHR(sink1->Close());
 
             const u32 first_vertex = static_cast<u32>(tess_sink.vertices.size());
@@ -426,13 +429,13 @@ func init(GameState* game_state) -> void
         finish_gpu_commands(gc);
     }
 
-    game_state->objects.push_back({ .mesh_index = STATIC_MESH_ROUND_RECT_100x100 });
-    game_state->cpp_hlsl_objects.push_back({ .x = -400.0f, .y = 400.0f });
+    game_state->objects.push_back({ .mesh_index = STATIC_MESH_ROUND_RECT_1x1 });
+    game_state->cpp_hlsl_objects.push_back({ .x = -4.0f, .y = 4.0f });
 
-    game_state->objects.push_back({ .mesh_index = STATIC_MESH_RECT_100x100 });
-    game_state->cpp_hlsl_objects.push_back({ .x = 600.0f, .y = -200.0f });
+    game_state->objects.push_back({ .mesh_index = STATIC_MESH_RECT_1x1 });
+    game_state->cpp_hlsl_objects.push_back({ .x = 6.0f, .y = -2.0f });
 
-    game_state->objects.push_back({ .mesh_index = STATIC_MESH_CIRCLE_100 });
+    game_state->objects.push_back({ .mesh_index = STATIC_MESH_CIRCLE_1 });
     game_state->cpp_hlsl_objects.push_back({ .x = 0.0f, .y = 0.0f });
 
     game_state->objects.push_back({ .mesh_index = STATIC_MESH_PATH_00 });
@@ -693,7 +696,7 @@ func draw(GameState* game_state) -> void
     GpuContext* gc = game_state->gpu.gc;
 
     {
-        const f32 r = 500.0f;
+        const f32 r = 5.0f;
         XMMATRIX xform;
         if (gc->window_width >= gc->window_height) {
             const float aspect = static_cast<f32>(gc->window_width) / static_cast<f32>(gc->window_height);
