@@ -234,9 +234,13 @@ IF EXIST game.lib DEL game.lib
 IF EXIST *.obj DEL *.obj
 IF EXIST *.exp DEL *.exp
 
-IF "%1" == "run" IF EXIST %NAME%.exe %NAME%.exe
+IF "%1"=="run" IF EXIST %NAME%.exe %NAME%.exe
 
-IF "%1"=="hlsl" (
+set COMPILE_HLSL=0
+IF "%1"=="hlsl" set COMPILE_HLSL=1
+IF "%1"=="clean" set COMPILE_HLSL=1
+
+IF %COMPILE_HLSL%==1 (
  IF EXIST %HLSL_OUT_DIR%\*.cso DEL %HLSL_OUT_DIR%\*.cso
  %DXC% %HLSL_FLAGS% /T vs_%HLSL_SM% /E s00_vs /D_S00 game_shaders.cpp /Fo %HLSL_OUT_DIR%\s00_vs.cso
  %DXC% %HLSL_FLAGS% /T ps_%HLSL_SM% /E s00_ps /D_S00 game_shaders.cpp /Fo %HLSL_OUT_DIR%\s00_ps.cso
