@@ -12,11 +12,11 @@ set CPP_FLAGS=/std:c++20 /GR- /EHsc /nologo /MP /Gm- /Zc:inline^
  /D"JPH_DEBUG_RENDERER"^
  /D"_TRACY_ENABLE"^
  /D"_TRACY_CALLSTACK"^
- /I"external/d3d12"^
- /I"external/imgui"^
- /I"external/directxmath"^
- /I"external/tracy"^
- /I"external"
+ /I"deps/d3d12"^
+ /I"deps/imgui"^
+ /I"deps/directxmath"^
+ /I"deps/tracy"^
+ /I"deps"
 
 if %CONFIG%==D set CPP_FLAGS=%CPP_FLAGS% /GS /Zi /Od /D"_DEBUG" /MTd /RTCs
 if %CONFIG%==R set CPP_FLAGS=%CPP_FLAGS% /O2 /Gy /MT /D"NDEBUG" /Oi /Ot /GS-
@@ -36,7 +36,7 @@ set HLSL_FLAGS=/WX /Ges /HV 2021 /nologo
 if %CONFIG%==D set HLSL_FLAGS=%HLSL_FLAGS% /Od /Zi /Qembed_debug
 if %CONFIG%==R set HLSL_FLAGS=%HLSL_FLAGS% /O3
 
-set SRC_IMGUI_ROOT=external\imgui
+set SRC_IMGUI_ROOT=deps\imgui
 set SRC_IMGUI=%SRC_IMGUI_ROOT%\imgui.cpp^
  %SRC_IMGUI_ROOT%\imgui_demo.cpp^
  %SRC_IMGUI_ROOT%\imgui_draw.cpp^
@@ -45,10 +45,10 @@ set SRC_IMGUI=%SRC_IMGUI_ROOT%\imgui.cpp^
  %SRC_IMGUI_ROOT%\imgui_impl_win32.cpp^
  %SRC_IMGUI_ROOT%\imgui_impl_dx12.cpp
 
-set SRC_TRACY_ROOT=external\tracy
+set SRC_TRACY_ROOT=deps\tracy
 set SRC_TRACY=%SRC_TRACY_ROOT%\TracyClient.cpp
 
-set SRC_JOLT_ROOT=external\jolt
+set SRC_JOLT_ROOT=deps\jolt
 set SRC_JOLT=%SRC_JOLT_ROOT%\AABBTree\AABBTreeBuilder.cpp^
  %SRC_JOLT_ROOT%\Core\Color.cpp^
  %SRC_JOLT_ROOT%\Core\Factory.cpp^
